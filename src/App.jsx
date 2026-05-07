@@ -1,28 +1,30 @@
-import { useState } from 'react';
-import UploadScreen from './components/UploadScreen';
-import ReportView from './components/ReportView';
-import { parseExcel } from './logic/parseExcel';
-import { scoreSites } from './logic/scoreSites';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { AppProvider } from './store/AppContext';
+import AppShell from './components/layout/AppShell';
+import LandingPage from './pages/LandingPage';
+import TrialSetupPage from './pages/TrialSetupPage';
+import DashboardPage from './pages/DashboardPage';
+import DataUploadPage from './pages/DataUploadPage';
+import SiteDetailPage from './pages/SiteDetailPage';
+import ReportsPage from './pages/ReportsPage';
 
 export default function App() {
-  const [view, setView] = useState('upload');
-  const [reportData, setReportData] = useState(null);
-
-  async function handleFile(arrayBuffer) {
-    const { sites, notices, trialMeta } = parseExcel(arrayBuffer);
-    const rankedSites = scoreSites(sites, trialMeta);
-    setReportData({ rankedSites, notices, trialMeta });
-    setView('report');
-  }
-
-  function handleReset() {
-    setView('upload');
-    setReportData(null);
-  }
-
-  if (view === 'report' && reportData) {
-    return <ReportView data={reportData} onReset={handleReset} />;
-  }
-
-  return <UploadScreen onFile={handleFile} />;
+  return (
+    <AppProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/trial/new" element={<TrialSetupPage />} />
+          <Route path="/trial/:id" element={<AppShell />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="setup" element={<TrialSetupPage />} />
+            <Route path="data" element={<DataUploadPage />} />
+            <Route path="sites/:siteId" element={<SiteDetailPage />} />
+            <Route path="reports" element={<ReportsPage />} />
+          </Route>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AppProvider>
+  );
 }
