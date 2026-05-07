@@ -126,6 +126,7 @@ async function autoLoadExcel(dispatch) {
         indication: trialMeta.indication || '',
         totalTarget: trialMeta.totalTarget,
         requiredRunRate: trialMeta.requiredRunRate,
+        monthsRemainingFromSheet: trialMeta.monthsRemainingFromSheet,
         startDate: trialMeta.trialStartDate ? trialMeta.trialStartDate.toISOString().split('T')[0] : '',
         targetCompletionDate: trialMeta.targetCompletionDate ? trialMeta.targetCompletionDate.toISOString().split('T')[0] : '',
       },

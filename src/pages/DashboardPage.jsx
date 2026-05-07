@@ -142,7 +142,10 @@ export default function DashboardPage() {
   const totalEnrolled = rankedSites.reduce((s, site) => s + (site.enrolmentSummary?.cumEnrolled || 0), 0);
   const pctOfTarget   = trial.totalTarget ? Math.round((totalEnrolled / trial.totalTarget) * 100) : null;
   const activeSites   = rankedSites.filter(s => s.months && s.months.length > 0).length;
-  const monthsRemaining = monthsRemainingFrom(trial.targetCompletionDate);
+  // Use months remaining direct from sheet if available; fall back to date calculation
+  const monthsRemaining = trial.monthsRemainingFromSheet != null
+    ? trial.monthsRemainingFromSheet
+    : monthsRemainingFrom(trial.targetCompletionDate);
 
   // Total months of data (from first to last month across all sites)
   const allMonthDates = Object.values(trial.sites || {}).flatMap(s => (s.months || []).map(m => new Date(m.date)));
