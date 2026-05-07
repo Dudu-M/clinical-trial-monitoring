@@ -1,5 +1,7 @@
-import { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useState } from 'react';
 import { loadFromStorage, saveToStorage, generateId } from '../utils/storage';
+import { parseExcel } from '../logic/parseExcel';
+import { scoreSites } from '../logic/scoreSites';
 
 const AppContext = createContext(null);
 
@@ -14,7 +16,14 @@ function reducer(state, action) {
       return action.payload;
 
     case 'CREATE_TRIAL': {
-      const trial = { ...action.trial, id: action.trial.id || generateId(), createdAt: new Date().toISOString(), sites: {}, dataQualityNotices: [], lastUpdated: null };
+      const trial = {
+        ...action.trial,
+        id: action.trial.id || generateId(),
+        createdAt: new Date().toISOString(),
+        sites: {},
+        dataQualityNotices: [],
+        lastUpdated: null,
+      };
       return { ...state, trials: { ...state.trials, [trial.id]: trial }, activeTrialId: trial.id };
     }
 
@@ -28,13 +37,13 @@ function reducer(state, action) {
 
     case 'SAVE_UPLOAD': {
       const existing = state.trials[action.trialId];
-      // Merge new sites with existing (preserve notes, emailLog)
       const mergedSites = { ...existing.sites };
       for (const [siteId, newSite] of Object.entries(action.sites)) {
         const prev = mergedSites[siteId] || {};
         mergedSites[siteId] = {
           ...newSite,
-          notes: prev.notes || [],
+          // Preserve user-added notes (objects) but keep Excel string notes in the new parse
+          notes: newSite.notes || prev.notes || [],
           emailLog: prev.emailLog || [],
         };
       }
@@ -60,7 +69,10 @@ function reducer(state, action) {
         ...state,
         trials: {
           ...state.trials,
-          [action.trialId]: { ...trial, sites: { ...trial.sites, [action.siteId]: { ...site, notes: [...(site.notes || []), note] } } },
+          [action.trialId]: {
+            ...trial,
+            sites: { ...trial.sites, [action.siteId]: { ...site, notes: [...(site.notes || []), note] } },
+          },
         },
       };
     }
@@ -73,7 +85,10 @@ function reducer(state, action) {
         ...state,
         trials: {
           ...state.trials,
-          [action.trialId]: { ...trial, sites: { ...trial.sites, [action.siteId]: { ...site, emailLog: [...(site.emailLog || []), entry] } } },
+          [action.trialId]: {
+            ...trial,
+            sites: { ...trial.sites, [action.siteId]: { ...site, emailLog: [...(site.emailLog || []), entry] } },
+          },
         },
       };
     }
@@ -89,17 +104,57 @@ function reducer(state, action) {
   }
 }
 
+async function autoLoadExcel(dispatch) {
+  try {
+    const res = await fetch('/site_data_For_candidate.xlsx');
+    if (!res.ok) return;
+    const buf = await res.arrayBuffer();
+    const { sites, notices, trialMeta } = parseExcel(buf);
+
+    // Score sites
+    const scored = scoreSites(sites, trialMeta);
+    const sitesObj = {};
+    for (const site of scored) sitesObj[site.id] = site;
+
+    const trialId = generateId();
+    dispatch({
+      type: 'CREATE_TRIAL',
+      trial: {
+        id: trialId,
+        name: trialMeta.trialName,
+        sponsor: trialMeta.sponsor,
+        indication: trialMeta.indication || '',
+        totalTarget: trialMeta.totalTarget,
+        requiredRunRate: trialMeta.requiredRunRate,
+        startDate: trialMeta.trialStartDate ? trialMeta.trialStartDate.toISOString().split('T')[0] : '',
+        targetCompletionDate: trialMeta.targetCompletionDate ? trialMeta.targetCompletionDate.toISOString().split('T')[0] : '',
+      },
+    });
+    dispatch({ type: 'SAVE_UPLOAD', trialId, sites: sitesObj, notices });
+  } catch (e) {
+    console.warn('Auto-load failed:', e);
+  }
+}
+
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [bootstrapped, setBootstrapped] = useState(false);
 
+  // Load from localStorage, then auto-load Excel if empty
   useEffect(() => {
     const saved = loadFromStorage();
-    if (saved) dispatch({ type: 'LOAD_STATE', payload: saved });
+    if (saved && Object.keys(saved.trials || {}).length > 0) {
+      dispatch({ type: 'LOAD_STATE', payload: saved });
+      setBootstrapped(true);
+    } else {
+      autoLoadExcel(dispatch).finally(() => setBootstrapped(true));
+    }
   }, []);
 
+  // Auto-save to localStorage after every state change
   useEffect(() => {
-    saveToStorage(state);
-  }, [state]);
+    if (bootstrapped) saveToStorage(state);
+  }, [state, bootstrapped]);
 
   const actions = useCallback(() => ({
     loadState: (payload) => dispatch({ type: 'LOAD_STATE', payload }),
@@ -112,7 +167,11 @@ export function AppProvider({ children }) {
     deleteTrial: (trialId) => dispatch({ type: 'DELETE_TRIAL', trialId }),
   }), []);
 
-  return <AppContext.Provider value={{ state, dispatch, actions: actions() }}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={{ state, dispatch, actions: actions(), bootstrapped }}>
+      {children}
+    </AppContext.Provider>
+  );
 }
 
 export function useAppStore() {

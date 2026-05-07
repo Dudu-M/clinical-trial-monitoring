@@ -27,7 +27,7 @@ function scoreScreenFailure(site) {
   if (rate < 0.3) return 0;
   if (rate < 0.5) return 1;
   if (rate < 0.7) return 2;
-  return 3;
+  return 3; // 70%+ always critical
 }
 
 function scoreQueryBurden(months) {
@@ -42,7 +42,6 @@ function scoreQueryBurden(months) {
 
 function scoreSDV(months) {
   if (months.length === 0) return 0;
-  // Use most recent month that has an SDV value
   for (let i = months.length - 1; i >= 0; i--) {
     const sdv = months[i].sdvPct;
     if (sdv != null && !isNaN(sdv)) {
@@ -60,15 +59,14 @@ function scoreDeviations(months) {
   const devs = months.map(m => m.deviations ?? 0);
   const last = devs[devs.length - 1];
   const max = Math.max(...devs);
-  const isRising = devs.every((v, i) => i === 0 || v >= devs[i - 1]);
+  const isRising = devs.length > 1 && devs.every((v, i) => i === 0 || v >= devs[i - 1]);
   if (max === 0) return 0;
   if (isRising && last >= 3) return 3;
   if (max >= 3 || isRising) return 2;
   return 1;
 }
 
-// Score a single month's snapshot for trend calculation
-function scoreMonthSnapshot(month, allMonthsSoFar) {
+function scoreMonthSnapshot(month) {
   const enrolTarget = month.target ?? 0;
   const enrolScore = enrolTarget === 0 ? 0 : (() => {
     const r = (month.enrolled ?? 0) / enrolTarget;
@@ -101,8 +99,8 @@ function scoreMonthSnapshot(month, allMonthsSoFar) {
 
 function trendSignal(months) {
   if (months.length < 2) return 'stable';
-  const firstScore = scoreMonthSnapshot(months[0], months.slice(0, 1));
-  const lastScore = scoreMonthSnapshot(months[months.length - 1], months);
+  const firstScore = scoreMonthSnapshot(months[0]);
+  const lastScore  = scoreMonthSnapshot(months[months.length - 1]);
   const delta = lastScore - firstScore;
   if (delta >= 2) return 'deteriorating';
   if (delta === 1) return 'trending-worse';
@@ -115,8 +113,7 @@ function persistentConcernMonths(months) {
   let maxConsecutive = 0;
   let current = 0;
   for (const m of months) {
-    const score = scoreMonthSnapshot(m, months);
-    if (score >= 6) {
+    if (scoreMonthSnapshot(m) >= 6) {
       current++;
       maxConsecutive = Math.max(maxConsecutive, current);
     } else {
@@ -124,6 +121,17 @@ function persistentConcernMonths(months) {
     }
   }
   return maxConsecutive >= 2 ? maxConsecutive : null;
+}
+
+function extractNoteText(note) {
+  if (typeof note === 'string') return note;
+  if (note && typeof note === 'object') return note.text || '';
+  return '';
+}
+
+function hasLeaveKeyword(notes) {
+  const combined = (notes || []).map(extractNoteText).join(' ').toLowerCase();
+  return ['leave', 'annual leave', 'absence', 'away', 'off sick'].some(kw => combined.includes(kw));
 }
 
 export function scoreSites(sites, trialMeta) {
@@ -143,15 +151,14 @@ export function scoreSites(sites, trialMeta) {
     const screenFailureRate = sfDenom > 0 ? totalScreenFailed / sfDenom : 0;
 
     const scores = {
-      enrolment: scoreEnrolment(site),
+      enrolment:    scoreEnrolment(site),
       screenFailure: scoreScreenFailure(site),
-      queryBurden: scoreQueryBurden(months),
-      sdv: scoreSDV(months),
-      deviations: scoreDeviations(months),
+      queryBurden:  scoreQueryBurden(months),
+      sdv:          scoreSDV(months),
+      deviations:   scoreDeviations(months),
     };
-    scores.total = scores.enrolment + scores.screenFailure + scores.queryBurden + scores.sdv + scores.deviations;
+    const baseTotal = scores.enrolment + scores.screenFailure + scores.queryBurden + scores.sdv + scores.deviations;
 
-    const rag = scores.total >= 8 ? 'red' : scores.total >= 4 ? 'amber' : 'green';
     const trend = trendSignal(months);
     const persistent = persistentConcernMonths(months);
 
@@ -164,8 +171,36 @@ export function scoreSites(sites, trialMeta) {
     const latestMonthWithSdv = [...months].reverse().find(m => m.sdvPct != null);
     const latestSdvPct = latestMonthWithSdv ? latestMonthWithSdv.sdvPct : null;
     const latestQueriesAged = months.length > 0 ? (months[months.length - 1].queriesAged ?? 0) : 0;
-
     const deviationsTrend = months.map(m => m.deviations ?? 0);
+
+    // ── Contextual modifiers ──────────────────────────────────────────────
+    let adjustedTotal = baseTotal;
+    const modifierFlags = [];
+    const modifierNotes = [];
+
+    // Modifier 1: Newly activated — < 2 full months of data
+    const isNewlyActivated = months.length < 2;
+    if (isNewlyActivated) {
+      adjustedTotal = Math.max(0, adjustedTotal - 2);
+      modifierFlags.push('Recently activated — limited data');
+    }
+
+    // Modifier 2: Coordinator on leave
+    const onLeave = hasLeaveKeyword(site.notes || []);
+    if (onLeave) {
+      adjustedTotal = Math.max(0, adjustedTotal - 1);
+      modifierNotes.push('Note: recent coordinator absence may affect metrics');
+    }
+
+    // Modifier 3: Persistent concern — adds 2 points
+    if (persistent) {
+      adjustedTotal = Math.min(15, adjustedTotal + 2);
+      modifierFlags.push(`⚠ Persistent concern — ${persistent} months`);
+    }
+
+    scores.total = adjustedTotal;
+
+    const rag = scores.total >= 8 ? 'red' : scores.total >= 4 ? 'amber' : 'green';
 
     return {
       ...site,
@@ -186,10 +221,13 @@ export function scoreSites(sites, trialMeta) {
       latestSdvPct,
       latestQueriesAged,
       deviationsTrend,
+      modifierFlags,
+      modifierNotes,
+      isNewlyActivated,
+      onLeave,
     };
   });
 
-  // Sort worst first (highest total score), ties by site ID
   return scored.sort((a, b) => {
     if (b.scores.total !== a.scores.total) return b.scores.total - a.scores.total;
     return a.id.localeCompare(b.id);

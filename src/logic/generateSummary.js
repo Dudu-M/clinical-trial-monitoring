@@ -4,17 +4,22 @@ function pct(ratio) {
 
 function formatDate(date) {
   if (!date) return 'unknown date';
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function noteText(note) {
+  if (typeof note === 'string') return note;
+  if (note && typeof note === 'object') return note.text || '';
+  return '';
 }
 
 export function generateSummary(site, trialMeta) {
   const { scores, rag, trendSignal, persistentConcern, craOverdue, enrolmentSummary,
     screenFailureRate, latestSdvPct, latestQueriesAged, deviationsTrend, months, notes,
-    lastMonitoringVisit, daysWithoutVisit } = site;
+    lastMonitoringVisit, daysWithoutVisit, modifierFlags, modifierNotes } = site;
 
   const parts = [];
-
-  // ── Opening: primary concern ───────────────────────────────────────────
   const enrollPct = pct(enrolmentSummary.ratio);
 
   // Priority 1: Screen failure masking enrolment (Site E pattern)
@@ -25,12 +30,10 @@ export function generateSummary(site, trialMeta) {
     parts.push(
       `Enrolment figures appear on or near target, but mask a serious screening problem — ${totalFailed} patients screened and failed across ${months.length} month${months.length !== 1 ? 's' : ''}, a ${sfPct} screen failure rate.`
     );
-    parts.push(
-      `This suggests a potential eligibility or screening protocol issue that requires investigation before further screening activity.`
-    );
+    parts.push(`This suggests a potential eligibility or screening protocol issue that requires investigation before further screening activity.`);
   }
 
-  // Priority 2: Across-the-board deterioration (Site B pattern)
+  // Priority 2: Across-the-board deterioration
   else if (trendSignal === 'deteriorating') {
     parts.push(
       `Every quality metric has deteriorated over the monitoring period. Enrolment is at ${enrollPct} of cumulative target (${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients).`
@@ -53,9 +56,7 @@ export function generateSummary(site, trialMeta) {
 
   // Priority 4: Query / SDV concern
   else if (scores.queryBurden >= 2 || scores.sdv >= 2) {
-    parts.push(
-      `Enrolment is on track at ${enrollPct}, but data quality concerns require attention.`
-    );
+    parts.push(`Enrolment is on track at ${enrollPct}, but data quality concerns require attention.`);
     if (scores.queryBurden >= 2) {
       parts.push(`There are ${latestQueriesAged} queries aged over 14 days unresolved.`);
     }
@@ -64,14 +65,14 @@ export function generateSummary(site, trialMeta) {
     }
   }
 
-  // Default: describe highest-scoring dimension
+  // Default
   else {
     parts.push(
       `${site.rawName} is performing ${rag === 'green' ? 'well' : 'adequately'} with enrolment at ${enrollPct} of cumulative target.`
     );
   }
 
-  // ── Secondary signals ──────────────────────────────────────────────────
+  // Secondary signals
   if (scores.deviations >= 2) {
     const devStr = deviationsTrend.join('→');
     parts.push(`Protocol deviations are ${trendSignal.includes('deteriorat') || trendSignal === 'trending-worse' ? 'rising' : 'elevated'} (${devStr}).`);
@@ -86,20 +87,89 @@ export function generateSummary(site, trialMeta) {
   }
 
   if (craOverdue && lastMonitoringVisit) {
-    parts.push(`No CRA monitoring visit has been conducted in ${daysWithoutVisit} days (last visit: ${formatDate(lastMonitoringVisit)}) — a site visit is overdue.`);
+    const d = lastMonitoringVisit instanceof Date ? lastMonitoringVisit : new Date(lastMonitoringVisit);
+    parts.push(`No CRA monitoring visit has been conducted in ${daysWithoutVisit} days (last visit: ${formatDate(d)}) — a site visit is overdue.`);
   } else if (craOverdue) {
     parts.push(`No CRA monitoring visit on record within the data period — a site visit is overdue.`);
   }
 
-  // ── Site notes ─────────────────────────────────────────────────────────
-  if (notes && notes.length > 0) {
-    parts.push(notes.filter(Boolean).join(' '));
+  // Modifier notes (leave, etc.)
+  if (modifierNotes && modifierNotes.length > 0) {
+    parts.push(modifierNotes.join(' '));
   }
 
-  // ── Data quality flags ─────────────────────────────────────────────────
-  if (site.dataQualityFlags.includes('target_imputed')) {
+  // Raw notes — convert objects to strings, never concatenate raw objects
+  const rawNoteTexts = (notes || []).map(noteText).filter(Boolean);
+  if (rawNoteTexts.length > 0) {
+    parts.push(rawNoteTexts.join(' '));
+  }
+
+  // Data quality flags
+  if (site.dataQualityFlags && site.dataQualityFlags.includes('target_imputed')) {
     parts.push(`Note: one or more monthly targets were missing and have been imputed using the site's modal target value.`);
   }
 
   return parts.join(' ');
+}
+
+// Shorter one-line headline for dashboard cards
+export function generateHeadline(site, trialMeta) {
+  const { scores, trendSignal, craOverdue, enrolmentSummary, screenFailureRate,
+    latestSdvPct, latestQueriesAged, modifierFlags, notes, lastMonitoringVisit, daysWithoutVisit } = site;
+
+  const parts = [];
+  const allNoteText = (notes || []).map(noteText).join(' ').toLowerCase();
+
+  // Note-based flags (from notes intelligence layer)
+  if (allNoteText.includes('withdrawing') || allNoteText.includes('pi considering')) {
+    parts.push('PI withdrawal risk');
+  }
+  if (allNoteText.includes('additional study') || allNoteText.includes('additional stud')) {
+    parts.push('PI workload risk');
+  }
+  if (allNoteText.includes('eligibility') || allNoteText.includes('population mismatch') || allNoteText.includes('inclusion criteria')) {
+    parts.push('eligibility problem');
+  }
+
+  // Primary concern
+  if (scores.screenFailure >= 3 && scores.enrolment <= 1) {
+    const sfPct = Math.round(screenFailureRate * 100);
+    parts.unshift(`${sfPct}% screen failure rate masks on-target enrolment`);
+  } else if (trendSignal === 'deteriorating') {
+    parts.push('all quality metrics deteriorating');
+  } else if (scores.enrolment >= 2) {
+    parts.unshift(`Behind cumulative target (${Math.round(enrolmentSummary.ratio * 100)}%)`);
+  } else if (scores.queryBurden >= 2) {
+    parts.push(`${latestQueriesAged} aged queries`);
+  } else if (scores.sdv >= 2 && latestSdvPct != null) {
+    parts.push(`SDV at ${Math.round(latestSdvPct * 100)}%`);
+  }
+
+  // CRA visit overdue with date
+  if (craOverdue) {
+    if (lastMonitoringVisit) {
+      const d = lastMonitoringVisit instanceof Date ? lastMonitoringVisit : new Date(lastMonitoringVisit);
+      const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      parts.push(`CRA not visited since ${dateStr}`);
+    } else {
+      parts.push('CRA visit overdue');
+    }
+  }
+
+  // Modifier flags (newly activated, leave)
+  if (modifierFlags) {
+    for (const f of modifierFlags) {
+      if (f.includes('Recently activated')) parts.unshift('Recently activated');
+      if (f.includes('Persistent')) {/* already shown as badge */}
+    }
+  }
+
+  // All-green site
+  if (parts.length === 0 && site.rag === 'green') {
+    const sdvStr = latestSdvPct != null ? ` · ${Math.round(latestSdvPct * 100)}% SDV` : '';
+    const qStr = latestQueriesAged === 0 ? ' · zero aged queries' : '';
+    return `Exemplar site — hitting targets${sdvStr}${qStr}`;
+  }
+
+  return parts.join(' · ') || `${site.rawName} — monitoring ongoing`;
 }

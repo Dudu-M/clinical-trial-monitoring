@@ -1,116 +1,122 @@
-import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
 import { scoreSites } from '../logic/scoreSites';
-import { generateSummary } from '../logic/generateSummary';
+import { generateHeadline } from '../logic/generateSummary';
 import RagBadge from '../components/shared/RagBadge';
 import DataQualityBanner from '../components/shared/DataQualityBanner';
 
+function pct(ratio) { return Math.round((ratio ?? 0) * 100) + '%'; }
+
 function TrendBadge({ signal }) {
   const map = {
-    deteriorating:  { cls: 'trend-deteriorating',  label: '↓ Deteriorating' },
+    deteriorating:    { cls: 'trend-deteriorating',  label: '↓ Deteriorating' },
     'trending-worse': { cls: 'trend-trending-worse', label: '↘ Trending worse' },
-    stable:         { cls: 'trend-stable',          label: '→ Stable' },
-    improving:      { cls: 'trend-improving',       label: '↑ Improving' },
+    stable:           { cls: 'trend-stable',          label: '→ Stable' },
+    improving:        { cls: 'trend-improving',       label: '↑ Improving' },
   };
   const { cls, label } = map[signal] || map.stable;
   return <span className={`trend-badge ${cls}`}>{label}</span>;
 }
 
-function DimPill({ label, score }) {
-  const cls = `dimension-pill-score s${score}`;
-  return (
-    <div className="dimension-pill">
-      <span className="dimension-pill-label">{label}</span>
-      <span className={cls}>{score}</span>
-    </div>
-  );
-}
-
-function SiteRankCard({ site, rank, trialMeta }) {
-  const [open, setOpen] = useState(false);
+function SiteCard({ site, rank, trialMeta }) {
   const navigate = useNavigate();
   const { id } = useParams();
 
   const ragCardCls = site.rag === 'red' ? 'rag-red-card' : site.rag === 'amber' ? 'rag-amber-card' : 'rag-green-card';
-  const scoreCls = site.rag === 'red' ? 'red' : site.rag === 'amber' ? 'amber' : 'green';
+  const scoreCls   = site.rag === 'red' ? 'red' : site.rag === 'amber' ? 'amber' : 'green';
+  const headline   = generateHeadline(site, trialMeta);
 
-  const summary = generateSummary(site, trialMeta);
+  const sfPct    = Math.round((site.screenFailureRate || 0) * 100);
+  const sdvPct   = site.latestSdvPct != null ? Math.round(site.latestSdvPct * 100) : null;
+  const devTrend = (site.deviationsTrend || []).join('→') || '—';
 
-  const flags = [];
-  if (site.scores.enrolment >= 2) flags.push({ cls: site.rag, text: 'Enrolment deficit' });
-  if (site.scores.screenFailure >= 2) flags.push({ cls: 'red', text: 'Screen failure rate' });
-  if (site.scores.queryBurden >= 2) flags.push({ cls: 'amber', text: 'Aged queries' });
-  if (site.scores.sdv >= 2) flags.push({ cls: 'amber', text: 'SDV incomplete' });
-  if (site.scores.deviations >= 2) flags.push({ cls: 'amber', text: 'Protocol deviations' });
-  if (site.craOverdue) flags.push({ cls: 'info', text: 'CRA visit overdue' });
-  if (site.persistentConcern) flags.push({ cls: 'red', text: `Risk elevated ${site.persistentConcern}+ months` });
+  const metrics = [
+    { label: 'Enrolment', value: pct(site.enrolmentSummary?.ratio), warn: (site.enrolmentSummary?.ratio ?? 1) < 0.75 },
+    { label: 'Screen fail', value: sfPct + '%', warn: sfPct >= 30 },
+    { label: 'Aged queries', value: site.latestQueriesAged ?? '—', warn: (site.latestQueriesAged ?? 0) > 3 },
+    { label: 'SDV', value: sdvPct != null ? sdvPct + '%' : '—', warn: sdvPct != null && sdvPct < 80 },
+    { label: 'Deviations', value: devTrend, warn: false },
+  ];
 
   return (
-    <div className={`site-rank-card ${ragCardCls}`}>
-      <div className="site-rank-header" onClick={() => setOpen(o => !o)}>
+    <div
+      className={`site-rank-card ${ragCardCls} site-rank-card--clickable`}
+      onClick={() => navigate(`/trial/${id}/sites/${site.id}`)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') navigate(`/trial/${id}/sites/${site.id}`); }}
+    >
+      <div className="site-rank-header" style={{ cursor: 'pointer' }}>
         <span className="site-rank-number">#{rank}</span>
+
         <div className="site-rank-info">
           <div className="site-rank-name">{site.rawName}</div>
           {site.hospital && <div className="site-rank-hospital">{site.hospital}</div>}
         </div>
+
         <div className="site-rank-signals">
           <RagBadge status={site.rag === 'red' ? 'Red' : site.rag === 'amber' ? 'Amber' : 'Green'} />
           <TrendBadge signal={site.trendSignal} />
-          <span className={`site-rank-score ${scoreCls}`}>{site.scores.total}</span>
-          <span className={`site-rank-chevron${open ? ' open' : ''}`}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="6 9 12 15 18 9"/>
+          <span className={`site-rank-score ${scoreCls}`}>{site.scores?.total}</span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
             </svg>
           </span>
         </div>
       </div>
 
-      {open && (
-        <div className="site-rank-body">
-          {/* Why flagged summary */}
-          <div className="site-rank-summary">{summary}</div>
-
-          {/* Dimension breakdown */}
-          <div className="site-rank-dimensions">
-            <DimPill label="Enrolment" score={site.scores.enrolment} />
-            <DimPill label="Screen fail" score={site.scores.screenFailure} />
-            <DimPill label="Queries" score={site.scores.queryBurden} />
-            <DimPill label="SDV" score={site.scores.sdv} />
-            <DimPill label="Deviations" score={site.scores.deviations} />
-          </div>
-
-          {/* Flag chips */}
-          {flags.length > 0 && (
-            <div className="site-rank-flags">
-              {flags.map((f, i) => (
-                <span key={i} className={`flag-chip ${f.cls}`}>
-                  {f.text}
-                </span>
-              ))}
-            </div>
+      {/* Flags row */}
+      {(site.persistentConcern || site.craOverdue || (site.modifierFlags && site.modifierFlags.length > 0)) && (
+        <div style={{ padding: '0 20px 10px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {site.modifierFlags && site.modifierFlags.map((f, i) => (
+            <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
+          ))}
+          {site.craOverdue && !site.modifierFlags?.some(f => f.includes('CRA')) && (
+            <span className="flag-chip amber">CRA visit overdue</span>
           )}
-
-          <div className="site-rank-actions">
-            <button
-              className="btn btn-primary btn-sm"
-              onClick={() => navigate(`/trial/${id}/sites/${site.id}`)}
-            >
-              View full detail →
-            </button>
-          </div>
         </div>
       )}
+
+      {/* Headline */}
+      <div style={{ padding: '0 20px 12px', fontSize: 13, color: 'var(--text-primary)', fontStyle: 'italic', lineHeight: 1.5 }}>
+        {headline}
+      </div>
+
+      {/* Metric strip */}
+      <div className="site-card-metrics">
+        {metrics.map(m => (
+          <div key={m.label} className={`site-card-metric${m.warn ? ' warn' : ''}`}>
+            <div className="site-card-metric-val">{m.value}</div>
+            <div className="site-card-metric-label">{m.label}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function formatMonthsRemaining(targetDate) {
-  if (!targetDate) return null;
+function buildTrialMeta(trial) {
+  const allMonthDates = Object.values(trial.sites || {})
+    .flatMap(s => (s.months || []).map(m => new Date(m.date)));
+  const dataStart = allMonthDates.length > 0 ? new Date(Math.min(...allMonthDates)) : new Date();
+  const dataEnd   = allMonthDates.length > 0 ? new Date(Math.max(...allMonthDates)) : new Date();
+  const dataEndMonth = new Date(dataEnd.getFullYear(), dataEnd.getMonth() + 1, 0);
+  return {
+    trialName: trial.name,
+    sponsor: trial.sponsor,
+    totalTarget: trial.totalTarget || 120,
+    dataStart,
+    dataEnd: dataEndMonth,
+  };
+}
+
+function monthsRemainingFrom(iso) {
+  if (!iso) return null;
   const now = new Date();
-  const target = new Date(targetDate);
-  const months = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
-  return Math.max(0, months);
+  const target = new Date(iso);
+  const m = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+  return Math.max(0, m);
 }
 
 export default function DashboardPage() {
@@ -129,23 +135,31 @@ export default function DashboardPage() {
   }
 
   const hasSites = Object.keys(trial.sites || {}).length > 0;
-  const rankedSites = hasSites ? scoreSites(trial.sites, buildTrialMeta(trial)) : [];
   const trialMeta = buildTrialMeta(trial);
+  const rankedSites = hasSites ? scoreSites(trial.sites, trialMeta) : [];
 
+  // Metrics
   const totalEnrolled = rankedSites.reduce((s, site) => s + (site.enrolmentSummary?.cumEnrolled || 0), 0);
-  const pctOfTarget = trial.totalTarget ? Math.round((totalEnrolled / trial.totalTarget) * 100) : null;
-  const activeSites = rankedSites.filter(s => s.months && s.months.length > 0).length;
-  const monthsRemaining = formatMonthsRemaining(trial.targetCompletionDate);
+  const pctOfTarget   = trial.totalTarget ? Math.round((totalEnrolled / trial.totalTarget) * 100) : null;
+  const activeSites   = rankedSites.filter(s => s.months && s.months.length > 0).length;
+  const monthsRemaining = monthsRemainingFrom(trial.targetCompletionDate);
 
-  const totalTarget = trial.totalTarget || 0;
-  const avgRunRate = activeSites > 0
-    ? (rankedSites.reduce((s, site) => s + (site.enrolmentSummary?.runRate || 0), 0) / activeSites).toFixed(1)
-    : null;
-  const requiredRunRate = (monthsRemaining && totalTarget)
-    ? ((totalTarget - totalEnrolled) / Math.max(1, monthsRemaining)).toFixed(1)
-    : null;
+  // Total months of data (from first to last month across all sites)
+  const allMonthDates = Object.values(trial.sites || {}).flatMap(s => (s.months || []).map(m => new Date(m.date)));
+  const uniqueMonths = allMonthDates.length > 0
+    ? new Set(allMonthDates.map(d => `${d.getFullYear()}-${d.getMonth()}`)).size
+    : 1;
 
-  const redSites = rankedSites.filter(s => s.rag === 'red').length;
+  // Current run rate = total enrolled / months of data (per the spec: 72/3 = 24)
+  const currentRunRate = uniqueMonths > 0 ? (totalEnrolled / uniqueMonths).toFixed(1) : null;
+
+  // Required run rate: from trial setup field, or computed
+  const requiredRunRate = trial.requiredRunRate
+    || (monthsRemaining && trial.totalTarget
+      ? ((trial.totalTarget - totalEnrolled) / Math.max(1, monthsRemaining)).toFixed(1)
+      : null);
+
+  const redSites   = rankedSites.filter(s => s.rag === 'red').length;
   const amberSites = rankedSites.filter(s => s.rag === 'amber').length;
 
   return (
@@ -175,10 +189,9 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Data quality notices */}
       <DataQualityBanner notices={trial.dataQualityNotices} />
 
-      {/* Metric strip */}
+      {/* Trial metric strip */}
       {hasSites && (
         <div className="metric-strip">
           <div className="metric-card">
@@ -186,11 +199,13 @@ export default function DashboardPage() {
             <div className="metric-card-value">{activeSites}</div>
             <div className="metric-card-sub">{rankedSites.length} total</div>
           </div>
+
           <div className="metric-card">
             <div className="label metric-card-label">Enrolled to Date</div>
             <div className="metric-card-value">{totalEnrolled}</div>
             <div className="metric-card-sub">of {trial.totalTarget || '—'} target</div>
           </div>
+
           {pctOfTarget !== null && (
             <div className={`metric-card ${pctOfTarget >= 90 ? 'good' : pctOfTarget >= 70 ? '' : 'warn'}`}>
               <div className="label metric-card-label">% of Target</div>
@@ -198,36 +213,46 @@ export default function DashboardPage() {
               <div className="metric-card-sub">cumulative</div>
             </div>
           )}
+
           {monthsRemaining !== null && (
             <div className={`metric-card ${monthsRemaining > 3 ? '' : monthsRemaining > 1 ? 'warn' : 'bad'}`}>
               <div className="label metric-card-label">Months Remaining</div>
               <div className="metric-card-value">{monthsRemaining}</div>
-              <div className="metric-card-sub">to target completion</div>
+              <div className="metric-card-sub">to completion</div>
             </div>
           )}
+
           {requiredRunRate && (
             <div className="metric-card">
-              <div className="label metric-card-label">Required Run Rate</div>
+              <div className="label metric-card-label">Required Rate</div>
               <div className="metric-card-value">{requiredRunRate}</div>
-              <div className="metric-card-sub">pts/site/month needed</div>
+              <div className="metric-card-sub">pts/month needed</div>
             </div>
           )}
-          {avgRunRate && (
-            <div className={`metric-card ${Number(avgRunRate) >= Number(requiredRunRate) ? 'good' : 'bad'}`}>
-              <div className="label metric-card-label">Current Run Rate</div>
-              <div className="metric-card-value">{avgRunRate}</div>
-              <div className="metric-card-sub">pts/site/month actual</div>
+
+          {currentRunRate && (
+            <div className={`metric-card ${Number(currentRunRate) >= Number(requiredRunRate || 0) ? 'good' : 'bad'}`}>
+              <div className="label metric-card-label">Current Rate</div>
+              <div className="metric-card-value">{currentRunRate}</div>
+              <div className="metric-card-sub">pts/month actual</div>
             </div>
           )}
+
           <div className="metric-card">
             <div className="label metric-card-label">Site RAG</div>
-            <div className="metric-card-value" style={{ fontSize: 14, display: 'flex', gap: 6, alignItems: 'center', marginTop: 6 }}>
-              {redSites > 0 && <span style={{ color: 'var(--red)', fontWeight: 700, fontSize: 22 }}>{redSites}</span>}
-              {redSites > 0 && <span style={{ fontSize: 12, color: 'var(--red)' }}>Red</span>}
-              {amberSites > 0 && <span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: 22, marginLeft: 6 }}>{amberSites}</span>}
-              {amberSites > 0 && <span style={{ fontSize: 12, color: 'var(--amber)' }}>Amber</span>}
-              {redSites === 0 && amberSites === 0 && <span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 22 }}>All</span>}
-              {redSites === 0 && amberSites === 0 && <span style={{ fontSize: 12, color: 'var(--green)' }}>Green</span>}
+            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {redSites > 0 && (
+                <span><span style={{ color: 'var(--red)', fontWeight: 700, fontSize: 22 }}>{redSites}</span>
+                  <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 3 }}>Red</span></span>
+              )}
+              {amberSites > 0 && (
+                <span><span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: 22 }}>{amberSites}</span>
+                  <span style={{ fontSize: 11, color: 'var(--amber)', marginLeft: 3 }}>Amber</span></span>
+              )}
+              {redSites === 0 && amberSites === 0 && (
+                <span><span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 22 }}>All</span>
+                  <span style={{ fontSize: 11, color: 'var(--green)', marginLeft: 3 }}>Green</span></span>
+              )}
             </div>
             <div className="metric-card-sub">site performance</div>
           </div>
@@ -238,7 +263,9 @@ export default function DashboardPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <h2 className="section-title">
           Site Performance Ranking
-          <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8, fontSize: 12 }}>worst → best · click to expand</span>
+          <span className="text-muted" style={{ fontWeight: 400, marginLeft: 8, fontSize: 12 }}>
+            worst → best · click to view detail
+          </span>
         </h2>
       </div>
 
@@ -248,39 +275,18 @@ export default function DashboardPage() {
             <div className="empty-state-icon">📊</div>
             <div className="empty-state-title">No data uploaded yet</div>
             <div className="empty-state-text">
-              Upload an Excel file with enrolment and quality data to start tracking site performance.
+              Upload an Excel file to start tracking site performance.
             </div>
-            <button className="btn btn-primary" onClick={() => navigate(`/trial/${id}/data`)}>
-              Upload Data
-            </button>
+            <button className="btn btn-primary" onClick={() => navigate(`/trial/${id}/data`)}>Upload Data</button>
           </div>
         </div>
       ) : (
         <div className="site-cards">
           {rankedSites.map((site, i) => (
-            <SiteRankCard key={site.id} site={site} rank={i + 1} trialMeta={trialMeta} />
+            <SiteCard key={site.id} site={site} rank={i + 1} trialMeta={trialMeta} />
           ))}
         </div>
       )}
     </div>
   );
-}
-
-function buildTrialMeta(trial) {
-  const allMonthDates = Object.values(trial.sites || {})
-    .flatMap(s => (s.months || []).map(m => new Date(m.date)));
-
-  const dataStart = allMonthDates.length > 0 ? new Date(Math.min(...allMonthDates)) : new Date();
-  const dataEnd   = allMonthDates.length > 0 ? new Date(Math.max(...allMonthDates)) : new Date();
-  const dataEndMonth = new Date(dataEnd.getFullYear(), dataEnd.getMonth() + 1, 0);
-
-  return {
-    trialName: trial.name,
-    sponsor: trial.sponsor,
-    totalTarget: trial.totalTarget || 120,
-    startDate: trial.startDate ? new Date(trial.startDate) : null,
-    targetCompletionDate: trial.targetCompletionDate ? new Date(trial.targetCompletionDate) : null,
-    dataStart,
-    dataEnd: dataEndMonth,
-  };
 }

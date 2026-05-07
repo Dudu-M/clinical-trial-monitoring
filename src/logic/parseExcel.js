@@ -1,12 +1,9 @@
 import * as XLSX from 'xlsx';
 
-// Normalise any site identifier to 'SITE-A', 'SITE-B', etc.
 function normaliseSiteId(raw) {
   if (raw == null) return null;
   const s = String(raw).trim().toUpperCase().replace(/\s+/g, '');
-  // Short form from Quality sheet: 'A', 'B', ...
   if (/^[A-Z]$/.test(s)) return `SITE-${s}`;
-  // 'SITE-A', 'SITE A', 'SITEA' (typo), 'SiteA'
   const m = s.match(/^SITE-?([A-Z])$/);
   if (m) return `SITE-${m[1]}`;
   return s;
@@ -16,7 +13,6 @@ function parseExcelDate(raw) {
   if (raw == null || raw === '') return null;
   if (raw instanceof Date) return raw;
   if (typeof raw === 'number') {
-    // Excel serial date → JS Date
     const d = XLSX.SSF.parse_date_code(raw);
     if (d) return new Date(d.y, d.m - 1, d.d);
   }
@@ -31,9 +27,16 @@ function formatMonthLabel(date) {
   return date.toLocaleString('en-GB', { month: 'short', year: '2-digit' });
 }
 
-// Get the column index whose header contains all of the given substrings (case-insensitive)
 function colIdx(headers, ...fragments) {
   return headers.findIndex(h => fragments.every(f => h.includes(f.toLowerCase())));
+}
+
+function colIdxAny(headers, ...alternatives) {
+  for (const frags of alternatives) {
+    const idx = headers.findIndex(h => frags.every(f => h.includes(f.toLowerCase())));
+    if (idx !== -1) return idx;
+  }
+  return -1;
 }
 
 function parseSheetRows(workbook, sheetKeyword) {
@@ -59,38 +62,52 @@ export function parseExcel(arrayBuffer) {
   const { rows: overviewRows } = parseSheetRows(workbook, 'trial');
   let trialName = 'CARDINAL';
   let sponsor = 'Hartwell Therapeutics';
+  let indication = '';
   let totalTarget = null;
+  let requiredRunRate = null;
+  let targetCompletionDate = null;
+  let trialStartDate = null;
+
   if (overviewRows.length > 0) {
     for (const row of overviewRows) {
+      if (!row) continue;
       for (let i = 0; i < row.length - 1; i++) {
-        const key = String(row[i] || '').toLowerCase();
-        if (key.includes('trial') && key.includes('name')) trialName = String(row[i + 1] || trialName);
-        if (key.includes('sponsor')) sponsor = String(row[i + 1] || sponsor);
-        if (key.includes('total') && key.includes('target')) totalTarget = Number(row[i + 1]) || null;
+        if (row[i] == null) continue;
+        const key = String(row[i]).toLowerCase().trim();
+        const val = row[i + 1];
+        if (!val && val !== 0) continue;
+        if (key.includes('trial') && key.includes('name')) trialName = String(val);
+        if (key.includes('sponsor')) sponsor = String(val);
+        if (key.includes('indication') || key.includes('condition') || key.includes('disease')) indication = String(val);
+        if (key.includes('total') && key.includes('target')) totalTarget = Number(val) || null;
+        if (key.includes('required') || (key.includes('run') && key.includes('rate'))) requiredRunRate = Number(val) || null;
+        if (key.includes('completion') || (key.includes('target') && key.includes('date')) || key.includes('end date')) targetCompletionDate = parseExcelDate(val);
+        if (key.includes('start') && key.includes('date')) trialStartDate = parseExcelDate(val);
       }
     }
   }
 
   // ── Site Contacts ───────────────────────────────────────────────────────
   const { rows: contactRows } = parseSheetRows(workbook, 'contact');
-  const contactMap = {}; // SITE-X → contact info
+  const contactMap = {};
   if (contactRows.length > 1) {
     const hdr = contactRows[0].map(h => String(h || '').trim().toLowerCase());
-    const siteCol = colIdx(hdr, 'site');
-    const hospCol = colIdx(hdr, 'hospital');
-    const piNameCol = colIdx(hdr, 'pi', 'name') !== -1 ? colIdx(hdr, 'pi', 'name') : colIdx(hdr, 'investigator');
-    const piEmailCol = colIdx(hdr, 'pi', 'email') !== -1 ? colIdx(hdr, 'pi', 'email') : -1;
-    const coordNameCol = colIdx(hdr, 'coord', 'name') !== -1 ? colIdx(hdr, 'coord', 'name') : colIdx(hdr, 'coordinator');
-    const coordEmailCol = colIdx(hdr, 'coord', 'email') !== -1 ? colIdx(hdr, 'coord', 'email') : -1;
-    const activatedCol = colIdx(hdr, 'activat');
-    const visitCol = colIdx(hdr, 'last', 'visit') !== -1 ? colIdx(hdr, 'last', 'visit') : colIdx(hdr, 'monitor');
-    const notesCol = colIdx(hdr, 'note');
+    const siteCol   = colIdx(hdr, 'site');
+    const hospCol   = colIdx(hdr, 'hospital');
+    const piNameCol = colIdxAny(hdr, ['pi', 'name'], ['investigator', 'name'], ['pi']);
+    const piEmailCol = colIdxAny(hdr, ['pi', 'email'], ['investigator', 'email']);
+    const coordNameCol = colIdxAny(hdr, ['coord', 'name'], ['coordinator', 'name'], ['coordinator']);
+    const coordEmailCol = colIdxAny(hdr, ['coord', 'email'], ['coordinator', 'email']);
+    const activatedCol = colIdxAny(hdr, ['activat'], ['activation']);
+    const visitCol  = colIdxAny(hdr, ['last', 'visit'], ['monitor', 'visit'], ['last', 'monitor']);
+    const notesCol  = colIdx(hdr, 'note');
 
     for (let i = 1; i < contactRows.length; i++) {
       const row = contactRows[i];
-      if (!row[siteCol]) continue;
+      if (!row || row[siteCol] == null) continue;
       const id = normaliseSiteId(row[siteCol]);
       if (!id) continue;
+      const rawNotes = notesCol >= 0 && row[notesCol] ? [String(row[notesCol])] : [];
       contactMap[id] = {
         hospital: hospCol >= 0 ? (row[hospCol] || '') : '',
         pi: {
@@ -103,31 +120,33 @@ export function parseExcel(arrayBuffer) {
         },
         dateActivated: activatedCol >= 0 ? parseExcelDate(row[activatedCol]) : null,
         lastMonitoringVisit: visitCol >= 0 ? parseExcelDate(row[visitCol]) : null,
-        notes: notesCol >= 0 ? [row[notesCol]].filter(Boolean) : [],
+        notes: rawNotes,
       };
     }
   }
 
   // ── Enrolment ───────────────────────────────────────────────────────────
   const { rows: enrolRows } = parseSheetRows(workbook, 'enrol');
-  const enrolBySite = {}; // SITE-X → [{ month, date, enrolled, target, screenFailures }]
+  const enrolBySite = {};
   let siteBAliasFixed = false;
 
   if (enrolRows.length > 1) {
     const hdr = enrolRows[0].map(h => String(h || '').trim().toLowerCase());
-    const siteCol = colIdx(hdr, 'site');
-    const monthCol = colIdx(hdr, 'month');
-    const enrolledCol = colIdx(hdr, 'enroll');
-    const targetCol = colIdx(hdr, 'target');
-    const sfCol = colIdx(hdr, 'screen fail') !== -1 ? colIdx(hdr, 'screen fail') : colIdx(hdr, 'failure');
-    const notesCol = colIdx(hdr, 'note');
+    const siteCol     = colIdx(hdr, 'site');
+    const monthCol    = colIdx(hdr, 'month');
+    const enrolledCol = colIdxAny(hdr, ['enroll'], ['enrolled'], ['patients enrolled']);
+    const targetCol   = colIdx(hdr, 'target');
+    const sfCol       = colIdxAny(hdr, ['screen fail'], ['screen_fail'], ['failure']);
+    const notesCol    = colIdx(hdr, 'note');
+
+    // Track site+month combos for duplicate detection
+    const seenKeys = {};
 
     for (let i = 1; i < enrolRows.length; i++) {
       const row = enrolRows[i];
-      if (row[siteCol] == null) continue;
+      if (!row || row[siteCol] == null) continue;
       const rawSiteId = String(row[siteCol]).trim();
 
-      // Rule 1 — detect SiteB typo (no space, no hyphen)
       if (/^SiteB$/i.test(rawSiteId) || /^SITEB$/i.test(rawSiteId)) {
         if (!siteBAliasFixed) {
           notices.push(`Data quality: "SiteB" typo detected and corrected to "Site B" in Enrolment sheet (row ${i + 1}).`);
@@ -141,8 +160,15 @@ export function parseExcel(arrayBuffer) {
       const rawMonth = row[monthCol];
       const monthDate = parseExcelDate(rawMonth);
       if (!monthDate) continue;
-      // Normalise to first of month
       const monthFirst = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+
+      // Duplicate detection
+      const dupeKey = `${id}::${monthFirst.getTime()}`;
+      if (seenKeys[dupeKey]) {
+        notices.push(`Duplicate enrolment records detected for ${id.replace('SITE-', 'Site ')} in ${formatMonthLabel(monthFirst)}. Only one monthly record per site should exist.`);
+        continue;
+      }
+      seenKeys[dupeKey] = true;
 
       const enrolled = row[enrolledCol] != null ? Number(row[enrolledCol]) : null;
       const target = row[targetCol] != null && row[targetCol] !== '' ? Number(row[targetCol]) : null;
@@ -153,7 +179,7 @@ export function parseExcel(arrayBuffer) {
       enrolBySite[id].push({
         month: formatMonthLabel(monthFirst),
         date: monthFirst,
-        enrolled: isNaN(enrolled) ? 0 : enrolled,
+        enrolled: isNaN(enrolled) ? 0 : (enrolled || 0),
         target,
         screenFailures: isNaN(screenFailures) ? 0 : screenFailures,
         notes: rowNotes,
@@ -163,20 +189,31 @@ export function parseExcel(arrayBuffer) {
 
   // ── SDV & Quality ───────────────────────────────────────────────────────
   const { rows: qualRows } = parseSheetRows(workbook, 'qual');
-  const qualBySite = {}; // SITE-X → [{ date, queriesAged, sdvPct, deviations }]
+  const qualBySite = {};
+  const sdvNormalisedSites = new Set();
 
   if (qualRows.length > 1) {
     const hdr = qualRows[0].map(h => String(h || '').trim().toLowerCase());
     const siteCol = colIdx(hdr, 'site');
     const monthCol = colIdx(hdr, 'month');
-    const queriesCol = colIdx(hdr, 'quer', '14') !== -1 ? colIdx(hdr, 'quer', '14') : colIdx(hdr, 'aged');
-    const sdvCol = colIdx(hdr, 'sdv');
-    const devCol = colIdx(hdr, 'deviat') !== -1 ? colIdx(hdr, 'deviat') : colIdx(hdr, 'protocol');
-    const visitCol = colIdx(hdr, 'last', 'visit') !== -1 ? colIdx(hdr, 'last', 'visit') : colIdx(hdr, 'monitor');
+
+    // More robust query column: prefer ">14 days" or "aged" over generic "queries"
+    const queriesCol = colIdxAny(
+      hdr,
+      ['quer', '14'],
+      ['aged'],
+      ['queries open', 'quer'],
+    );
+
+    const sdvCol = colIdxAny(hdr, ['sdv'], ['source data']);
+    const devCol = colIdxAny(hdr, ['deviat'], ['protocol']);
+    const visitCol = colIdxAny(hdr, ['last', 'visit'], ['monitor', 'visit'], ['last', 'monitor']);
+
+    const seenQualKeys = {};
 
     for (let i = 1; i < qualRows.length; i++) {
       const row = qualRows[i];
-      if (row[siteCol] == null) continue;
+      if (!row || row[siteCol] == null) continue;
       const id = normaliseSiteId(row[siteCol]);
       if (!id) continue;
 
@@ -185,13 +222,21 @@ export function parseExcel(arrayBuffer) {
       if (!monthDate) continue;
       const monthFirst = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
 
+      // Duplicate quality records
+      const dupeKey = `${id}::${monthFirst.getTime()}`;
+      if (seenQualKeys[dupeKey]) continue;
+      seenQualKeys[dupeKey] = true;
+
       const queriesAged = queriesCol >= 0 && row[queriesCol] != null ? Number(row[queriesCol]) : 0;
 
-      // Rule 2 — SDV normalisation
+      // SDV normalisation (whole number % → decimal)
       let sdvPct = sdvCol >= 0 && row[sdvCol] != null ? Number(row[sdvCol]) : null;
       if (sdvPct != null && !isNaN(sdvPct) && sdvPct > 1.0) {
         sdvPct = sdvPct / 100;
-        notices.push(`Data quality: SDV% values for ${id} appear to be whole-number percentages and have been normalised (divided by 100).`);
+        if (!sdvNormalisedSites.has(id)) {
+          notices.push(`Data quality: SDV% values for ${id.replace('SITE-', 'Site ')} appear to be whole-number percentages and have been normalised (divided by 100).`);
+          sdvNormalisedSites.add(id);
+        }
       }
 
       const deviations = devCol >= 0 && row[devCol] != null ? Number(row[devCol]) : 0;
@@ -208,19 +253,6 @@ export function parseExcel(arrayBuffer) {
     }
   }
 
-  // Deduplicate SDV normalisation notices per site
-  const seenSdvNotices = new Set();
-  const deduplicatedNotices = [];
-  for (const n of notices) {
-    if (n.includes('SDV%')) {
-      const siteMatch = n.match(/SITE-[A-Z]/);
-      const key = siteMatch ? siteMatch[0] : n;
-      if (seenSdvNotices.has(key)) continue;
-      seenSdvNotices.add(key);
-    }
-    deduplicatedNotices.push(n);
-  }
-
   // ── Merge into site objects ─────────────────────────────────────────────
   const allSiteIds = new Set([
     ...Object.keys(contactMap),
@@ -228,11 +260,18 @@ export function parseExcel(arrayBuffer) {
     ...Object.keys(qualBySite),
   ]);
 
+  // Cross-sheet validation: enrolment sites without contact records
+  for (const id of Object.keys(enrolBySite)) {
+    if (!contactMap[id]) {
+      notices.push(`${id.replace('SITE-', 'Site ')} has enrolment data but no contact record — coordinator details unavailable.`);
+    }
+  }
+
   const sites = {};
   for (const id of allSiteIds) {
     const contact = contactMap[id] || {};
     const enrolMonths = (enrolBySite[id] || []).sort((a, b) => a.date - b.date);
-    const qualMonths = (qualBySite[id] || []).sort((a, b) => a.date - b.date);
+    const qualMonths  = (qualBySite[id]  || []).sort((a, b) => a.date - b.date);
     const dateActivated = contact.dateActivated || null;
     const activationMonthStart = dateActivated
       ? new Date(dateActivated.getFullYear(), dateActivated.getMonth(), 1)
@@ -241,11 +280,13 @@ export function parseExcel(arrayBuffer) {
     // Rule 3 — impute missing targets
     const allTargets = enrolMonths.map(m => m.target).filter(t => t != null);
     const modal = modalValue(allTargets);
+    let targetImputedFlag = false;
     const filteredEnrolMonths = enrolMonths.map(m => {
       if (m.target == null && modal != null) {
-        deduplicatedNotices.push(
-          `Data quality: ${id} had a missing monthly target in ${m.month} — imputed using modal target (${modal}).`
-        );
+        if (!targetImputedFlag) {
+          notices.push(`Data quality: ${id.replace('SITE-', 'Site ')} had a missing monthly target — imputed using modal target (${modal}).`);
+          targetImputedFlag = true;
+        }
         return { ...m, target: modal, targetImputed: true };
       }
       return m;
@@ -260,19 +301,18 @@ export function parseExcel(arrayBuffer) {
       ? qualMonths.filter(m => m.date >= activationMonthStart)
       : qualMonths;
 
-    // Determine last monitoring visit: check both contact sheet and quality sheet
+    // Determine last monitoring visit from contact + quality sheets
     let lastVisit = contact.lastMonitoringVisit || null;
     for (const qm of activeQualMonths) {
-      if (qm.monitoringVisitDate) {
-        if (!lastVisit || qm.monitoringVisitDate > lastVisit) lastVisit = qm.monitoringVisitDate;
+      if (qm.monitoringVisitDate && (!lastVisit || qm.monitoringVisitDate > lastVisit)) {
+        lastVisit = qm.monitoringVisitDate;
       }
     }
 
-    // Merge enrol + quality months by date
+    // Merge enrol + quality months by date (first of month key)
     const monthMap = {};
     for (const em of activeEnrolMonths) {
-      const key = em.date.getTime();
-      monthMap[key] = { ...em };
+      monthMap[em.date.getTime()] = { ...em };
     }
     for (const qm of activeQualMonths) {
       const key = qm.date.getTime();
@@ -285,11 +325,11 @@ export function parseExcel(arrayBuffer) {
 
     const months = Object.values(monthMap).sort((a, b) => a.date - b.date);
 
-    // Collect all notes
+    // Collect raw string notes from contact + enrolment sheets
     const siteNotes = [
       ...(contact.notes || []),
       ...activeEnrolMonths.flatMap(m => m.notes || []),
-    ].filter(Boolean);
+    ].filter(n => n && typeof n === 'string' && n.trim());
 
     sites[id] = {
       id,
@@ -305,32 +345,25 @@ export function parseExcel(arrayBuffer) {
     };
 
     if (activeEnrolMonths.some(m => m.targetImputed)) sites[id].dataQualityFlags.push('target_imputed');
-    if (qualBySite[id] && qualBySite[id].some(m => m.sdvPct != null)) {
-      const rawSdv = qualBySite[id].find(m => {
-        const row = qualRows.find(r => {
-          const hdr = qualRows[0].map(h => String(h || '').trim().toLowerCase());
-          const siteCol = colIdx(hdr, 'site');
-          return r[siteCol] != null && normaliseSiteId(r[siteCol]) === id;
-        });
-        return row;
-      });
-    }
   }
 
   // Calculate trial-level metadata
   const allDates = Object.values(sites).flatMap(s => s.months.map(m => m.date));
   const dataStart = allDates.length > 0 ? new Date(Math.min(...allDates)) : new Date();
-  const dataEnd = allDates.length > 0 ? new Date(Math.max(...allDates)) : new Date();
-  // dataEnd is end of last month
+  const dataEnd   = allDates.length > 0 ? new Date(Math.max(...allDates)) : new Date();
   const dataEndMonth = new Date(dataEnd.getFullYear(), dataEnd.getMonth() + 1, 0);
 
   const trialMeta = {
     trialName,
     sponsor,
+    indication,
     totalTarget: totalTarget || 120,
+    requiredRunRate,
+    targetCompletionDate,
+    trialStartDate,
     dataStart,
     dataEnd: dataEndMonth,
   };
 
-  return { sites, notices: deduplicatedNotices, trialMeta };
+  return { sites, notices, trialMeta };
 }

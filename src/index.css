@@ -415,6 +415,56 @@ input, textarea, select { font-family: inherit; font-size: inherit; }
 
 .site-rank-actions { display: flex; gap: 8px; padding-top: 4px; }
 
+/* ── Clickable site card ───────────────────────────────────── */
+.site-rank-card--clickable {
+  cursor: pointer;
+}
+
+.site-rank-card--clickable:hover {
+  box-shadow: var(--shadow-lg);
+  border-color: var(--navy-mid);
+  transform: translateY(-1px);
+}
+
+.site-rank-card--clickable:focus-visible {
+  outline: 2px solid var(--navy-mid);
+  outline-offset: 2px;
+}
+
+/* ── Card metric strip (inside each site card) ─────────────── */
+.site-card-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border-top: 1px solid var(--border);
+  background: #FAFBFD;
+}
+
+.site-card-metric {
+  padding: 10px 14px;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+
+.site-card-metric:last-child { border-right: none; }
+
+.site-card-metric-val {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.site-card-metric-label {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.site-card-metric.warn .site-card-metric-val { color: var(--red); }
+
 /* ── Page header ───────────────────────────────────────────── */
 .page-header {
   display: flex;

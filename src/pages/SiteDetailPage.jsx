@@ -4,13 +4,14 @@ import { useAppStore } from '../store/AppContext';
 import { scoreSites } from '../logic/scoreSites';
 import { generateSummary } from '../logic/generateSummary';
 import { generateEmail, generateSponsorUpdate } from '../logic/generateEmail';
+import { analyseNotes } from '../logic/notesIntelligence';
 import RagBadge from '../components/shared/RagBadge';
 import CopyButton from '../components/shared/CopyButton';
 
 function buildTrialMeta(trial) {
   const allMonthDates = Object.values(trial.sites || {})
     .flatMap(s => (s.months || []).map(m => new Date(m.date)));
-  const dataEnd   = allMonthDates.length > 0 ? new Date(Math.max(...allMonthDates)) : new Date();
+  const dataEnd = allMonthDates.length > 0 ? new Date(Math.max(...allMonthDates)) : new Date();
   const dataEndMonth = new Date(dataEnd.getFullYear(), dataEnd.getMonth() + 1, 0);
   return {
     trialName: trial.name,
@@ -21,17 +22,15 @@ function buildTrialMeta(trial) {
   };
 }
 
-function pct(ratio) {
-  return Math.round((ratio ?? 0) * 100) + '%';
-}
+function pct(ratio) { return Math.round((ratio ?? 0) * 100) + '%'; }
 
 function ScoreBreakdown({ scores }) {
   const dims = [
-    { key: 'enrolment',    label: 'Enrolment' },
+    { key: 'enrolment',     label: 'Enrolment' },
     { key: 'screenFailure', label: 'Screen Failure' },
-    { key: 'queryBurden',  label: 'Query Burden' },
-    { key: 'sdv',          label: 'SDV Completeness' },
-    { key: 'deviations',   label: 'Protocol Deviations' },
+    { key: 'queryBurden',   label: 'Query Burden' },
+    { key: 'sdv',           label: 'SDV Completeness' },
+    { key: 'deviations',    label: 'Protocol Deviations' },
   ];
   return (
     <div className="score-panel">
@@ -81,18 +80,12 @@ function MonthTable({ months }) {
               <td style={{ fontWeight: 500 }}>{m.month}</td>
               <td className="num">{m.target ?? '—'}</td>
               <td className="num">{m.enrolled ?? '—'}</td>
-              <td className={`num${(m.screenFailures || 0) > 5 ? ' flag' : ''}`}>
-                {m.screenFailures ?? '—'}
-              </td>
-              <td className={`num${(m.queriesAged || 0) > 8 ? ' flag' : ''}`}>
-                {m.queriesAged ?? '—'}
-              </td>
+              <td className={`num${(m.screenFailures || 0) > 5 ? ' flag' : ''}`}>{m.screenFailures ?? '—'}</td>
+              <td className={`num${(m.queriesAged || 0) > 8 ? ' flag' : ''}`}>{m.queriesAged ?? '—'}</td>
               <td className={`num${m.sdvPct != null && m.sdvPct < 0.8 ? ' flag' : ''}`}>
                 {m.sdvPct != null ? pct(m.sdvPct) : '—'}
               </td>
-              <td className={`num${(m.deviations || 0) >= 3 ? ' flag' : ''}`}>
-                {m.deviations ?? '—'}
-              </td>
+              <td className={`num${(m.deviations || 0) >= 3 ? ' flag' : ''}`}>{m.deviations ?? '—'}</td>
             </tr>
           ))}
         </tbody>
@@ -101,47 +94,71 @@ function MonthTable({ months }) {
   );
 }
 
-function NotesSection({ trialId, siteId, notes }) {
+function NotesIntelligence({ notes }) {
+  const analysed = analyseNotes(notes);
+  if (analysed.length === 0) {
+    return <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No notes from data source.</p>;
+  }
+  return (
+    <div className="notes-list">
+      {analysed.map((n, i) => (
+        <div key={i} className="note-item">
+          <div className="note-text" style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: n.insight ? 6 : 0 }}>
+            {n.rawText}
+          </div>
+          {n.insight && (
+            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500, borderLeft: '3px solid var(--navy-mid)', paddingLeft: 10 }}>
+              {n.insight}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function UserNotesSection({ trialId, siteId, notes }) {
   const { actions } = useAppStore();
   const [text, setText] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+
+  // Only user-added notes are objects
+  const userNotes = (notes || []).filter(n => n && typeof n === 'object');
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!text.trim()) return;
-    setSubmitting(true);
     actions.addNote(trialId, siteId, text.trim());
     setText('');
-    setSubmitting(false);
   }
 
   return (
     <div>
-      {notes && notes.length > 0 ? (
+      {userNotes.length > 0 ? (
         <div className="notes-list" style={{ marginBottom: 16 }}>
-          {notes.filter(n => n && typeof n === 'object').map(note => (
+          {userNotes.map(note => (
             <div key={note.id} className="note-item">
               <div className="note-meta">
                 <span className="note-author">{note.author}</span>
-                <span className="note-date">{new Date(note.date).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="note-date">
+                  {new Date(note.date).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                </span>
               </div>
               <div className="note-text">{note.text}</div>
             </div>
           ))}
         </div>
       ) : (
-        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 14 }}>No notes yet.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 14 }}>No team notes yet.</p>
       )}
-
       <form className="note-form" onSubmit={handleSubmit}>
         <textarea
           className="note-textarea w-full"
           value={text}
           onChange={e => setText(e.target.value)}
-          placeholder="Add a note…"
+          placeholder="Add a note visible to all trial managers…"
         />
         <div>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={submitting || !text.trim()}>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim()}>
             Add Note
           </button>
         </div>
@@ -163,7 +180,7 @@ function EmailSection({ site, trialMeta, trialId, siteId }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10 }}>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>To: </span>
         {site.coordinator?.name || 'Site Coordinator'}
         {toEmail ? ` <${toEmail}>` : ''}
@@ -171,15 +188,11 @@ function EmailSection({ site, trialMeta, trialId, siteId }) {
       <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Subject: </span>{subject}
       </div>
-
       <div className="copy-box">
-        <div className="copy-box-actions">
-          <CopyButton text={body} />
-        </div>
+        <div className="copy-box-actions"><CopyButton text={body} /></div>
         <div className="copy-box-text">{body}</div>
       </div>
-
-      <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+      <div style={{ marginTop: 12 }}>
         <button className="btn btn-secondary btn-sm" onClick={handleLog} disabled={logged}>
           {logged ? '✓ Logged' : 'Log as Sent'}
         </button>
@@ -232,8 +245,6 @@ export default function SiteDetailPage() {
   }
 
   const trialMeta = buildTrialMeta(trial);
-
-  // Score the site (it may already have scores but re-compute for freshness)
   const rawSite = trial.sites[siteId];
   const scored = scoreSites(trial.sites, trialMeta).find(s => s.id === siteId) || rawSite;
 
@@ -241,22 +252,33 @@ export default function SiteDetailPage() {
   const ragLabel = scored.rag === 'red' ? 'Red' : scored.rag === 'amber' ? 'Amber' : 'Green';
 
   const trendMap = {
-    deteriorating: '↓ Deteriorating',
+    deteriorating:    '↓ Deteriorating',
     'trending-worse': '↘ Trending Worse',
-    stable: '→ Stable',
-    improving: '↑ Improving',
+    stable:           '→ Stable',
+    improving:        '↑ Improving',
   };
-  const trendCls = `trend-badge trend-${scored.trendSignal || 'stable'}`;
+
+  // All notes: string notes from Excel + object notes from UI
+  const allNotes = rawSite.notes || [];
+  const stringNotes = allNotes.filter(n => typeof n === 'string');
+
+  const tabs = [
+    { key: 'overview', label: 'Overview & Analysis' },
+    { key: 'months',   label: 'Monthly Data' },
+    { key: 'notes',    label: `Operational Notes (${stringNotes.length})` },
+    { key: 'team',     label: `Team Notes (${allNotes.filter(n => n && typeof n === 'object').length})` },
+    { key: 'email',    label: 'Email Draft' },
+    { key: 'log',      label: `Email Log (${(rawSite.emailLog || []).length})` },
+  ];
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ marginBottom: 6 }}>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/trial/${id}`)} style={{ marginBottom: 10, marginLeft: -8 }}>
-          ← Dashboard
-        </button>
-      </div>
+      {/* Back link */}
+      <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, marginLeft: -8 }} onClick={() => navigate(`/trial/${id}`)}>
+        ← Back to Dashboard
+      </button>
 
+      {/* Site header */}
       <div className="site-detail-header">
         <div className="site-detail-header-info">
           <div className="site-detail-title">{scored.rawName}</div>
@@ -264,34 +286,33 @@ export default function SiteDetailPage() {
           <div className="site-detail-badges">
             <RagBadge status={ragLabel} score={scored.scores?.total} />
             {scored.trendSignal && (
-              <span className={trendCls}>{trendMap[scored.trendSignal] || scored.trendSignal}</span>
+              <span className={`trend-badge trend-${scored.trendSignal}`}>
+                {trendMap[scored.trendSignal] || scored.trendSignal}
+              </span>
             )}
-            {scored.persistentConcern && (
-              <span className="flag-chip red">Persistent risk: {scored.persistentConcern}+ months</span>
-            )}
+            {scored.modifierFlags && scored.modifierFlags.map((f, i) => (
+              <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
+            ))}
             {scored.craOverdue && (
               <span className="flag-chip amber">CRA visit overdue</span>
             )}
           </div>
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)', flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
           {scored.pi?.name && <div><span style={{ fontWeight: 600 }}>PI:</span> {scored.pi.name}</div>}
           {scored.coordinator?.name && <div><span style={{ fontWeight: 600 }}>CRC:</span> {scored.coordinator.name}</div>}
           {scored.dateActivated && (
-            <div><span style={{ fontWeight: 600 }}>Activated:</span> {new Date(scored.dateActivated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+            <div>
+              <span style={{ fontWeight: 600 }}>Activated:</span>{' '}
+              {new Date(scored.dateActivated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </div>
           )}
         </div>
       </div>
 
       {/* Tabs */}
       <div className="tabs">
-        {[
-          { key: 'overview', label: 'Overview & Analysis' },
-          { key: 'months', label: 'Monthly Data' },
-          { key: 'notes', label: `Notes (${(rawSite.notes || []).filter(n => n && typeof n === 'object').length})` },
-          { key: 'email', label: 'Email Draft' },
-          { key: 'log', label: `Email Log (${(rawSite.emailLog || []).length})` },
-        ].map(t => (
+        {tabs.map(t => (
           <button
             key={t.key}
             className={`tab-btn${activeTab === t.key ? ' active' : ''}`}
@@ -305,19 +326,17 @@ export default function SiteDetailPage() {
       {/* Tab: Overview */}
       {activeTab === 'overview' && (
         <div>
-          {/* Analysis summary */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
-            <p style={{ fontSize: 13, lineHeight: 1.7, color: 'var(--text-primary)' }}>{summary}</p>
+            <p style={{ fontSize: 13, lineHeight: 1.7 }}>{summary}</p>
           </div>
-
-          {/* Score breakdown */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="section-title" style={{ marginBottom: 12 }}>Score Breakdown <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)' }}>(0 = no concern, 3 = critical)</span></div>
+            <div className="section-title" style={{ marginBottom: 12 }}>
+              Score Breakdown
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>(0 = no concern, 3 = critical)</span>
+            </div>
             {scored.scores && <ScoreBreakdown scores={scored.scores} />}
           </div>
-
-          {/* Key metrics */}
           <div className="metric-strip">
             {scored.enrolmentSummary && (
               <>
@@ -342,7 +361,7 @@ export default function SiteDetailPage() {
               <div className={`metric-card ${scored.screenFailureRate >= 0.5 ? 'bad' : scored.screenFailureRate >= 0.3 ? 'warn' : 'good'}`}>
                 <div className="label metric-card-label">Screen Failure</div>
                 <div className="metric-card-value">{pct(scored.screenFailureRate)}</div>
-                <div className="metric-card-sub">of screened patients</div>
+                <div className="metric-card-sub">of screened</div>
               </div>
             )}
             {scored.latestSdvPct != null && (
@@ -366,18 +385,26 @@ export default function SiteDetailPage() {
       {/* Tab: Monthly data */}
       {activeTab === 'months' && (
         <div className="card card-pad">
-          {scored.months && scored.months.length > 0 ? (
-            <MonthTable months={scored.months} />
-          ) : (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No monthly data available.</p>
-          )}
+          {scored.months && scored.months.length > 0
+            ? <MonthTable months={scored.months} />
+            : <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No monthly data available.</p>}
         </div>
       )}
 
-      {/* Tab: Notes */}
+      {/* Tab: Operational notes (from data source) */}
       {activeTab === 'notes' && (
         <div className="card card-pad">
-          <NotesSection trialId={id} siteId={siteId} notes={rawSite.notes || []} />
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14 }}>
+            Notes imported from the Excel data source, with generated insights.
+          </div>
+          <NotesIntelligence notes={stringNotes} />
+        </div>
+      )}
+
+      {/* Tab: Team notes (user-added) */}
+      {activeTab === 'team' && (
+        <div className="card card-pad">
+          <UserNotesSection trialId={id} siteId={siteId} notes={rawSite.notes || []} />
         </div>
       )}
 
@@ -388,14 +415,10 @@ export default function SiteDetailPage() {
             <div className="section-title" style={{ marginBottom: 12 }}>Check-in Email Draft</div>
             <EmailSection site={scored} trialMeta={trialMeta} trialId={id} siteId={siteId} />
           </div>
-
-          {/* Sponsor update */}
           <div className="card card-pad">
             <div className="section-title" style={{ marginBottom: 12 }}>Sponsor Update Paragraph</div>
             <div className="copy-box">
-              <div className="copy-box-actions">
-                <CopyButton text={generateSponsorUpdate(scored, trialMeta)} />
-              </div>
+              <div className="copy-box-actions"><CopyButton text={generateSponsorUpdate(scored, trialMeta)} /></div>
               <div className="copy-box-text">{generateSponsorUpdate(scored, trialMeta)}</div>
             </div>
           </div>
