@@ -40,7 +40,7 @@ function MetricCard({ label, value, sub, level, sub2 }) {
                : level === 'watch'   ? 'var(--amber-border)'
                : 'var(--border)';
   return (
-    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box' }}>
+    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '14px 14px' }}>
       <div className="label metric-card-label">{label}</div>
       <div className={`metric-card-value ${colorCls}`}>{value}</div>
       {sub && <div className="metric-card-sub">{sub}</div>}
@@ -124,14 +124,11 @@ function StatGroups({ scored }) {
           ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
           : null;
         const daysStr = scored.daysWithoutVisit != null ? `${scored.daysWithoutVisit} days ago` : null;
-        const sub = scored.craOverdue
-          ? `${daysStr || 'unknown'}  ·  Overdue`
-          : daysStr || 'no visit recorded';
         return (
           <MetricCard
             label="CRA Monitoring Visit"
             value={dateStr || '—'}
-            sub={sub}
+            sub={daysStr || 'no visit recorded'}
             level={craLevel}
           />
         );
@@ -140,12 +137,32 @@ function StatGroups({ scored }) {
   ].filter(Boolean);
 
   return (
-    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'stretch', marginBottom: 16 }}>
-      {metrics.map(m => (
-        <div key={m.key} style={{ flex: '1 1 140px', minWidth: 130, display: 'flex' }}>
-          {m.card}
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'stretch' }}>
+        {metrics.map(m => (
+          <div key={m.key} style={{ flex: '1 1 130px', minWidth: 120, display: 'flex' }}>
+            {m.card}
+          </div>
+        ))}
+      </div>
+      {/* Overdue tag — shown below the row so it's always visible regardless of card layout */}
+      {(scored.craOverdue || scored.modifierFlags?.length > 0) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+          {scored.craOverdue && (
+            <span className="flag-chip amber">
+              CRA visit overdue{scored.daysWithoutVisit != null ? ` · ${scored.daysWithoutVisit} days` : ''}
+            </span>
+          )}
+          {!scored.lastMonitoringVisit && (
+            <span className="flag-chip amber">No monitoring visit on record</span>
+          )}
+          {scored.modifierFlags?.map((f, i) =>
+            f.includes('Persistent') ? null : (
+              <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
+            )
+          )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
