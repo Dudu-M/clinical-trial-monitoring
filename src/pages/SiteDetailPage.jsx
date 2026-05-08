@@ -138,9 +138,9 @@ function StatGroups({ scored }) {
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'stretch' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: 8, alignItems: 'stretch' }}>
         {metrics.map(m => (
-          <div key={m.key} style={{ flex: '1 1 130px', minWidth: 120, display: 'flex' }}>
+          <div key={m.key} style={{ display: 'flex' }}>
             {m.card}
           </div>
         ))}

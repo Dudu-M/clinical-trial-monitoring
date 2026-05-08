@@ -1,7 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
 import { scoreSites } from '../logic/scoreSites';
-import { generateHeadline } from '../logic/generateSummary';
+import { generateHeadline, generateSummary } from '../logic/generateSummary';
 import RagBadge from '../components/shared/RagBadge';
 import DataQualityBanner from '../components/shared/DataQualityBanner';
 
@@ -42,7 +42,7 @@ function SiteCard({ site, rank, trialMeta }) {
 
   const ragCardCls = site.rag === 'red' ? 'rag-red-card' : site.rag === 'amber' ? 'rag-amber-card' : 'rag-green-card';
   const scoreCls   = site.rag === 'red' ? 'red' : site.rag === 'amber' ? 'amber' : 'green';
-  const headline   = generateHeadline(site, trialMeta);
+  const headline   = site.rag === 'green' ? generateSummary(site, trialMeta) : generateHeadline(site, trialMeta);
   const isAtRisk   = site.rag === 'red' || site.rag === 'amber';
 
   const sfPct    = Math.round((site.screenFailureRate || 0) * 100);
