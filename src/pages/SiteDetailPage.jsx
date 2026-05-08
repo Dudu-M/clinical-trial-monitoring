@@ -30,109 +30,183 @@ function scoreLevel(score) {
   return 'ok';
 }
 
-// ── Single-row metrics ───────────────────────────────────────────
-function MetricsRow({ scored }) {
+// ── Grouped stat sections ─────────────────────────────────────────
+function StatGroup({ level, children }) {
+  const labels = { flagged: 'Flagged', watch: 'Watch', ok: 'OK' };
+  const clsMap  = { flagged: 'stat-group-red', watch: 'stat-group-amber', ok: 'stat-group-green' };
+  const items = Array.isArray(children) ? children.filter(Boolean) : [children].filter(Boolean);
+  if (items.length === 0) return null;
+  return (
+    <div className={`stat-group ${clsMap[level]}`}>
+      <div className="stat-group-label">{labels[level]}</div>
+      <div className="stat-group-cards">{items}</div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, sub, level, sub2 }) {
+  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : '';
+  return (
+    <div className="metric-card">
+      <div className="label metric-card-label">{label}</div>
+      <div className={`metric-card-value ${colorCls}`}>{value}</div>
+      {sub && <div className="metric-card-sub">{sub}</div>}
+      {sub2 && (
+        <div className="metric-card-sub" style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+          {sub2}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatGroups({ scored }) {
   const s = scored.scores || {};
 
   const craLevel = scored.craOverdue ? 'flagged'
     : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
     : 'ok';
 
-  const cells = [
+  const metrics = [
     {
       key: 'enrol',
       level: scoreLevel(s.enrolment ?? 0),
-      label: 'Enrolment',
-      value: pct(scored.enrolmentSummary?.ratio),
-      sub: `${scored.enrolmentSummary?.cumEnrolled ?? 0} of ${scored.enrolmentSummary?.cumTarget ?? 0}`,
-      sub2: `${(scored.enrolmentSummary?.runRate ?? 0).toFixed(1)} pts/mo avg`,
+      card: (
+        <MetricCard
+          label="Enrolment"
+          value={pct(scored.enrolmentSummary?.ratio)}
+          sub={`${scored.enrolmentSummary?.cumEnrolled ?? 0} of ${scored.enrolmentSummary?.cumTarget ?? 0}`}
+          sub2={`${(scored.enrolmentSummary?.runRate ?? 0).toFixed(1)} pts/month avg`}
+          level={scoreLevel(s.enrolment ?? 0)}
+        />
+      ),
     },
-    {
+    scored.screenFailureRate > 0 && {
       key: 'sf',
       level: scoreLevel(s.screenFailure ?? 0),
-      label: 'Screen Failure',
-      value: pct(scored.screenFailureRate),
-      sub: 'of screened',
-      hidden: !scored.screenFailureRate,
+      card: (
+        <MetricCard
+          label="Screen Failure"
+          value={pct(scored.screenFailureRate)}
+          sub="of screened"
+          level={scoreLevel(s.screenFailure ?? 0)}
+        />
+      ),
     },
     {
       key: 'sdv',
       level: scoreLevel(s.sdv ?? 0),
-      label: 'SDV',
-      value: scored.latestSdvPct != null ? pct(scored.latestSdvPct) : '—',
-      sub: 'latest month',
+      card: (
+        <MetricCard
+          label="SDV"
+          value={scored.latestSdvPct != null ? pct(scored.latestSdvPct) : '—'}
+          sub="latest month"
+          level={scoreLevel(s.sdv ?? 0)}
+        />
+      ),
     },
     {
       key: 'queries',
       level: scoreLevel(s.queryBurden ?? 0),
-      label: 'Aged Queries',
-      value: scored.latestQueriesAged ?? 0,
-      sub: '>14 days open',
+      card: (
+        <MetricCard
+          label="Aged Queries"
+          value={scored.latestQueriesAged ?? 0}
+          sub=">14 days open"
+          level={scoreLevel(s.queryBurden ?? 0)}
+        />
+      ),
     },
     {
       key: 'dev',
       level: scoreLevel(s.deviations ?? 0),
-      label: 'Deviations',
-      value: (scored.deviationsTrend || []).at(-1) ?? 0,
-      sub: scored.deviationsTrend?.length > 1 ? (scored.deviationsTrend || []).join(' → ') : 'latest month',
+      card: (
+        <MetricCard
+          label="Deviations"
+          value={(scored.deviationsTrend || []).at(-1) ?? 0}
+          sub={scored.deviationsTrend?.length > 1 ? (scored.deviationsTrend || []).join(' → ') : 'latest month'}
+          level={scoreLevel(s.deviations ?? 0)}
+        />
+      ),
     },
     {
       key: 'cra',
       level: craLevel,
-      label: 'Last CRA Visit',
-      value: scored.lastMonitoringVisit
-        ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
-        : '—',
-      sub: scored.daysWithoutVisit != null
-        ? `${scored.daysWithoutVisit}d ago${scored.craOverdue ? ' · overdue' : ''}`
-        : 'no visit recorded',
+      card: (
+        <MetricCard
+          label="Last CRA Visit"
+          value={scored.lastMonitoringVisit
+            ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+            : '—'}
+          sub={scored.daysWithoutVisit != null
+            ? `${scored.daysWithoutVisit}d ago${scored.craOverdue ? ' · overdue' : ''}`
+            : 'no visit recorded'}
+          level={craLevel}
+        />
+      ),
     },
-  ].filter(c => !c.hidden);
+  ].filter(Boolean);
 
-  const levelCls = { flagged: 'cell-flagged', watch: 'cell-watch', ok: 'cell-ok' };
-  const valueCls = { flagged: 'bad', watch: 'warn', ok: 'good' };
+  const groups = {
+    flagged: metrics.filter(m => m.level === 'flagged'),
+    watch:   metrics.filter(m => m.level === 'watch'),
+    ok:      metrics.filter(m => m.level === 'ok'),
+  };
 
   return (
-    <div>
-      <div className="site-metrics-row">
-        {cells.map(c => (
-          <div key={c.key} className={`site-metric-cell ${levelCls[c.level]}`}>
-            <div className="label metric-card-label">{c.label}</div>
-            <div className={`metric-card-value ${valueCls[c.level]}`} style={{ fontSize: 20 }}>{c.value}</div>
-            <div className="metric-card-sub">{c.sub}</div>
-            {c.sub2 && <div className="metric-card-sub" style={{ marginTop: 2, borderTop: '1px solid var(--border)', paddingTop: 4 }}>{c.sub2}</div>}
-          </div>
-        ))}
-      </div>
-      {/* Legend */}
-      <div className="site-metrics-legend">
-        <span style={{ fontWeight: 600 }}>Score key:</span>
-        <span><span className="legend-dot dot-ok" />OK (score 0)</span>
-        <span><span className="legend-dot dot-watch" />Watch (score 1–2)</span>
-        <span><span className="legend-dot dot-flagged" />Flagged (score 3)</span>
-        <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>Each dimension 0–3 · Total out of 15</span>
-      </div>
+    <div style={{ marginBottom: 16 }}>
+      <StatGroup level="flagged">{groups.flagged.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
+      <StatGroup level="watch">{groups.watch.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
+      <StatGroup level="ok">{groups.ok.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
     </div>
   );
 }
 
-// ── Actionable insight card ──────────────────────────────────────
+// ── Why card with collapsed insights ─────────────────────────────
 function InsightCard({ insight, onTabSwitch }) {
-  const clsMap = {
-    critical: { wrap: 'insight-critical', icon: '⚠' },
-    action:   { wrap: 'insight-action',   icon: '→' },
-    watch:    { wrap: 'insight-watch',    icon: '◎' },
-    insight:  { wrap: 'insight-info',     icon: '💡' },
-  };
-  const { wrap, icon } = clsMap[insight.severity] || clsMap.insight;
+  const severity = insight.severity;
+  const borderColor = severity === 'critical' || severity === 'action'
+    ? 'var(--red)'
+    : severity === 'watch'
+    ? 'var(--amber)'
+    : 'var(--navy-mid)';
   return (
-    <div className={`insight-card ${wrap}`}>
-      <span className="insight-icon">{icon}</span>
-      <div className="insight-body">
-        <div className="insight-text">{insight.text}</div>
-        {insight.suggestion && <div className="insight-suggestion">{insight.suggestion}</div>}
+    <div style={{
+      display: 'flex',
+      gap: 12,
+      padding: '10px 0',
+      borderBottom: '1px solid var(--border)',
+    }}>
+      <div style={{
+        width: 3,
+        borderRadius: 2,
+        background: borderColor,
+        flexShrink: 0,
+        alignSelf: 'stretch',
+        minHeight: 16,
+      }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>{insight.text}</div>
+        {insight.suggestion && (
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>{insight.suggestion}</div>
+        )}
         {insight.linkTab && onTabSwitch && (
-          <button className="insight-link" onClick={() => onTabSwitch(insight.linkTab)}>
+          <button
+            style={{
+              display: 'inline-block',
+              marginTop: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--navy-mid)',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+            onClick={() => onTabSwitch(insight.linkTab)}
+          >
             {insight.linkLabel || 'View →'}
           </button>
         )}
@@ -141,7 +215,70 @@ function InsightCard({ insight, onTabSwitch }) {
   );
 }
 
-// ── Score breakdown ──────────────────────────────────────────────
+function WhyCard({ scored, summary, insights, stringNotes, onTabSwitch }) {
+  const [showInsights, setShowInsights] = useState(false);
+
+  const analysed = analyseNotes(stringNotes);
+
+  return (
+    <div className="card card-pad" style={{ marginBottom: 16 }}>
+      <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
+
+      {/* Summary paragraph */}
+      <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--text-primary)' }}>{summary}</p>
+
+      {/* Collapsible suggested actions */}
+      {insights.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '4px 0', fontWeight: 600, color: 'var(--navy-mid)' }}
+            onClick={() => setShowInsights(v => !v)}
+          >
+            {showInsights
+              ? '↑ Hide suggested actions'
+              : `↓ ${insights.length} suggested action${insights.length !== 1 ? 's' : ''}`}
+          </button>
+          {showInsights && (
+            <div style={{ marginTop: 10 }}>
+              {insights.map((ins, i) => (
+                <InsightCard key={i} insight={ins} onTabSwitch={onTabSwitch} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Operational notes — separate, only if not already folded into summary */}
+      {analysed.length > 0 && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+          <div className="label" style={{ marginBottom: 10 }}>Operational notes from data</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {analysed.map((n, i) => (
+              <div key={i} style={{ fontSize: 13, lineHeight: 1.6 }}>
+                <span style={{ color: 'var(--text-muted)' }}>{n.rawText}</span>
+                {n.insight && (
+                  <div style={{
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
+                    fontWeight: 500,
+                    borderLeft: '3px solid var(--navy-light)',
+                    paddingLeft: 10,
+                    marginTop: 4,
+                  }}>
+                    {n.insight}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Score breakdown ───────────────────────────────────────────────
 function ScoreBreakdown({ scores }) {
   const dims = [
     { key: 'enrolment',     label: 'Enrolment' },
@@ -177,7 +314,7 @@ function ScoreBreakdown({ scores }) {
   );
 }
 
-// ── Monthly data table ───────────────────────────────────────────
+// ── Monthly data table ────────────────────────────────────────────
 function MonthTable({ months }) {
   const hasVisitDates = months.some(m => m.monitoringVisitDate);
   return (
@@ -222,34 +359,10 @@ function MonthTable({ months }) {
   );
 }
 
-// ── Notes sections ───────────────────────────────────────────────
-function NotesIntelligence({ notes }) {
-  const analysed = analyseNotes(notes);
-  if (analysed.length === 0) {
-    return <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No notes from data source.</p>;
-  }
-  return (
-    <div className="notes-list">
-      {analysed.map((n, i) => (
-        <div key={i} className="note-item">
-          <div className="note-text" style={{ color: 'var(--text-muted)', fontSize: 12, marginBottom: n.insight ? 6 : 0 }}>
-            {n.rawText}
-          </div>
-          {n.insight && (
-            <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 500, borderLeft: '3px solid var(--navy-mid)', paddingLeft: 10 }}>
-              {n.insight}
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
+// ── Team notes ────────────────────────────────────────────────────
 function UserNotesSection({ trialId, siteId, notes }) {
   const { actions } = useAppStore();
   const [text, setText] = useState('');
-
   const userNotes = (notes || []).filter(n => n && typeof n === 'object');
 
   function handleSubmit(e) {
@@ -286,17 +399,15 @@ function UserNotesSection({ trialId, siteId, notes }) {
           placeholder="Add a note visible to all trial managers…"
         />
         <div>
-          <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim()}>
-            Add Note
-          </button>
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!text.trim()}>Add Note</button>
         </div>
       </form>
     </div>
   );
 }
 
-// ── Email sections ───────────────────────────────────────────────
-function EmailSection({ site, trialMeta, trialId, siteId }) {
+// ── Email sub-tabs ────────────────────────────────────────────────
+function EmailCoordinatorTab({ site, trialMeta, trialId, siteId }) {
   const { actions } = useAppStore();
   const { subject, body, toEmail } = generateEmail(site, trialMeta);
   const [logged, setLogged] = useState(false);
@@ -309,10 +420,9 @@ function EmailSection({ site, trialMeta, trialId, siteId }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 8 }}>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 6 }}>
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>To: </span>
-        {site.coordinator?.name || 'Site Coordinator'}
-        {toEmail ? ` <${toEmail}>` : ''}
+        {site.coordinator?.name || 'Site Coordinator'}{toEmail ? ` <${toEmail}>` : ''}
       </div>
       <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 14 }}>
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Subject: </span>{subject}
@@ -325,6 +435,21 @@ function EmailSection({ site, trialMeta, trialId, siteId }) {
         <button className="btn btn-secondary btn-sm" onClick={handleLog} disabled={logged}>
           {logged ? '✓ Logged' : 'Log as Sent'}
         </button>
+      </div>
+    </div>
+  );
+}
+
+function SponsorUpdateTab({ site, trialMeta }) {
+  const text = generateSponsorUpdate(site, trialMeta);
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 12 }}>
+        Ready-to-paste paragraph for sponsor status updates.
+      </p>
+      <div className="copy-box">
+        <div className="copy-box-actions"><CopyButton text={text} /></div>
+        <div className="copy-box-text">{text}</div>
       </div>
     </div>
   );
@@ -357,13 +482,14 @@ function EmailLogSection({ emailLog }) {
   );
 }
 
-// ── Main page ────────────────────────────────────────────────────
+// ── Main page ─────────────────────────────────────────────────────
 export default function SiteDetailPage() {
   const { id, siteId } = useParams();
   const navigate = useNavigate();
   const { state } = useAppStore();
   const trial = state.trials[id];
   const [activeTab, setActiveTab] = useState('overview');
+  const [emailSubTab, setEmailSubTab] = useState('coordinator');
 
   if (!trial || !trial.sites?.[siteId]) {
     return (
@@ -376,7 +502,7 @@ export default function SiteDetailPage() {
 
   const trialMeta = buildTrialMeta(trial);
   const rawSite = trial.sites[siteId];
-  const scored = scoreSites(trial.sites, trialMeta, trial.thresholds).find(s => s.id === siteId) || rawSite;
+  const scored  = scoreSites(trial.sites, trialMeta, trial.thresholds).find(s => s.id === siteId) || rawSite;
 
   const summary  = generateSummary(scored, trialMeta);
   const insights = generateActionableInsights(scored);
@@ -396,9 +522,8 @@ export default function SiteDetailPage() {
   const tabs = [
     { key: 'overview', label: 'Overview & Analysis' },
     { key: 'months',   label: 'Monthly Data' },
-    { key: 'notes',    label: `Operational Notes (${stringNotes.length})` },
     { key: 'team',     label: `Team Notes (${allNotes.filter(n => n && typeof n === 'object').length})` },
-    { key: 'email',    label: 'Email Draft' },
+    { key: 'email',    label: 'Email & Updates' },
     { key: 'log',      label: `Email Log (${(rawSite.emailLog || []).length})` },
   ];
 
@@ -454,50 +579,34 @@ export default function SiteDetailPage() {
       {/* Tabs */}
       <div className="tabs">
         {tabs.map(t => (
-          <button
-            key={t.key}
-            className={`tab-btn${activeTab === t.key ? ' active' : ''}`}
-            onClick={() => setActiveTab(t.key)}
-          >
+          <button key={t.key} className={`tab-btn${activeTab === t.key ? ' active' : ''}`} onClick={() => setActiveTab(t.key)}>
             {t.label}
           </button>
         ))}
       </div>
 
-      {/* Tab: Overview */}
+      {/* Overview tab */}
       {activeTab === 'overview' && (
         <div>
-          {/* All 6 metric cards in one row */}
-          <MetricsRow scored={scored} />
+          {/* Grouped metric cards */}
+          <StatGroups scored={scored} />
 
-          {/* Why flagged — FIRST, with insights + operational notes inside */}
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
-            <p style={{ fontSize: 13, lineHeight: 1.7, marginBottom: insights.length > 0 ? 16 : 0 }}>{summary}</p>
-
-            {/* Actionable insights */}
-            {insights.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: stringNotes.length > 0 ? 16 : 0 }}>
-                {insights.map((ins, i) => (
-                  <InsightCard key={i} insight={ins} onTabSwitch={setActiveTab} />
-                ))}
-              </div>
-            )}
-
-            {/* Operational notes from Excel */}
-            {stringNotes.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-                <div className="label" style={{ marginBottom: 8 }}>Operational notes from data</div>
-                <NotesIntelligence notes={stringNotes} />
-              </div>
-            )}
-          </div>
+          {/* Why flagged — summary + collapsed insights + operational notes */}
+          <WhyCard
+            scored={scored}
+            summary={summary}
+            insights={insights}
+            stringNotes={stringNotes}
+            onTabSwitch={tab => { setActiveTab(tab); if (tab === 'email') setEmailSubTab('coordinator'); }}
+          />
 
           {/* Score breakdown */}
           <div className="card card-pad">
             <div className="section-title" style={{ marginBottom: 12 }}>
               Score Breakdown
-              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>(0 = no concern, 3 = critical per dimension)</span>
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                (0 = no concern · 3 = critical · total out of 15)
+              </span>
             </div>
             {scored.scores && <ScoreBreakdown scores={scored.scores} />}
           </div>
@@ -506,18 +615,9 @@ export default function SiteDetailPage() {
 
       {activeTab === 'months' && (
         <div className="card card-pad">
-          {scored.months && scored.months.length > 0
+          {scored.months?.length > 0
             ? <MonthTable months={scored.months} />
             : <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No monthly data available.</p>}
-        </div>
-      )}
-
-      {activeTab === 'notes' && (
-        <div className="card card-pad">
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14 }}>
-            Notes imported from the Excel data source, with generated insights.
-          </div>
-          <NotesIntelligence notes={stringNotes} />
         </div>
       )}
 
@@ -527,19 +627,35 @@ export default function SiteDetailPage() {
         </div>
       )}
 
+      {/* Email & Updates — sub-tabs */}
       {activeTab === 'email' && (
         <div>
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="section-title" style={{ marginBottom: 12 }}>Check-in Email Draft</div>
-            <EmailSection site={scored} trialMeta={trialMeta} trialId={id} siteId={siteId} />
+          {/* Sub-tab bar */}
+          <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
+            {[
+              { key: 'coordinator', label: 'Email Coordinator' },
+              { key: 'sponsor',     label: 'Sponsor Update' },
+            ].map(st => (
+              <button
+                key={st.key}
+                className={`tab-btn${emailSubTab === st.key ? ' active' : ''}`}
+                onClick={() => setEmailSubTab(st.key)}
+              >
+                {st.label}
+              </button>
+            ))}
           </div>
-          <div className="card card-pad">
-            <div className="section-title" style={{ marginBottom: 12 }}>Sponsor Update Paragraph</div>
-            <div className="copy-box">
-              <div className="copy-box-actions"><CopyButton text={generateSponsorUpdate(scored, trialMeta)} /></div>
-              <div className="copy-box-text">{generateSponsorUpdate(scored, trialMeta)}</div>
+
+          {emailSubTab === 'coordinator' && (
+            <div className="card card-pad">
+              <EmailCoordinatorTab site={scored} trialMeta={trialMeta} trialId={id} siteId={siteId} />
             </div>
-          </div>
+          )}
+          {emailSubTab === 'sponsor' && (
+            <div className="card card-pad">
+              <SponsorUpdateTab site={scored} trialMeta={trialMeta} />
+            </div>
+          )}
         </div>
       )}
 

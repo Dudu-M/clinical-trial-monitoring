@@ -16,97 +16,90 @@ function noteText(note) {
 
 export function generateSummary(site, trialMeta) {
   const { scores, rag, trendSignal, persistentConcern, craOverdue, enrolmentSummary,
-    screenFailureRate, latestSdvPct, latestQueriesAged, deviationsTrend, months, notes,
+    screenFailureRate, latestSdvPct, latestQueriesAged, deviationsTrend, months,
     lastMonitoringVisit, daysWithoutVisit, modifierFlags, modifierNotes } = site;
 
   const parts = [];
   const enrollPct = pct(enrolmentSummary.ratio);
+  const isGreen = rag === 'green';
 
-  // Priority 1: Screen failure masking enrolment (Site E pattern)
-  if (scores.screenFailure >= 3 && scores.enrolment <= 1) {
+  // Green sites: always use positive/neutral framing regardless of trend signal
+  if (isGreen) {
+    const sdvStr = latestSdvPct != null ? ` SDV is ${pct(latestSdvPct)}.` : '';
+    const qStr   = latestQueriesAged === 0 ? ' No aged queries.' : '';
+    parts.push(
+      `${site.rawName} is performing well — enrolment at ${enrollPct} of cumulative target (${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients).${sdvStr}${qStr}`
+    );
+    if (trendSignal === 'improving') {
+      parts.push(`Metrics have improved over the monitoring period.`);
+    }
+  }
+
+  // Priority 1 (amber/red): Screen failure masking enrolment
+  else if (scores.screenFailure >= 3 && scores.enrolment <= 1) {
     const sfPct = pct(screenFailureRate);
-    const totalScreened = months.reduce((s, m) => s + (m.enrolled ?? 0) + (m.screenFailures ?? 0), 0);
     const totalFailed = months.reduce((s, m) => s + (m.screenFailures ?? 0), 0);
     parts.push(
       `Enrolment figures appear on or near target, but mask a serious screening problem — ${totalFailed} patients screened and failed across ${months.length} month${months.length !== 1 ? 's' : ''}, a ${sfPct} screen failure rate.`
     );
-    parts.push(`This suggests a potential eligibility or screening protocol issue that requires investigation before further screening activity.`);
+    parts.push(`This suggests a potential eligibility or screening protocol issue that requires investigation.`);
   }
 
-  // Priority 2: Across-the-board deterioration
+  // Priority 2 (amber/red): Across-the-board deterioration
   else if (trendSignal === 'deteriorating') {
     parts.push(
-      `Every quality metric has deteriorated over the monitoring period. Enrolment is at ${enrollPct} of cumulative target (${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients).`
+      `Multiple quality metrics have deteriorated over the monitoring period. Enrolment is at ${enrollPct} of cumulative target (${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients).`
     );
-    if (latestQueriesAged > 0) {
-      parts.push(`Queries aged over 14 days have grown to ${latestQueriesAged} open items.`);
-    }
-    if (latestSdvPct != null) {
-      parts.push(`SDV completion has fallen to ${pct(latestSdvPct)}.`);
-    }
+    if (latestQueriesAged > 0) parts.push(`Queries aged over 14 days have grown to ${latestQueriesAged} open items.`);
+    if (latestSdvPct != null && scores.sdv >= 1) parts.push(`SDV completion stands at ${pct(latestSdvPct)}.`);
   }
 
   // Priority 3: Significant enrolment deficit
   else if (scores.enrolment >= 2) {
     const gap = enrolmentSummary.cumTarget - enrolmentSummary.cumEnrolled;
     parts.push(
-      `Enrolment is significantly behind target — ${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients enrolled (${enrollPct}), leaving a gap of ${gap} patients against the cumulative target.`
+      `Enrolment is behind target — ${enrolmentSummary.cumEnrolled} of ${enrolmentSummary.cumTarget} patients enrolled (${enrollPct}), a gap of ${gap} patients against the cumulative target.`
     );
   }
 
-  // Priority 4: Query / SDV concern
+  // Priority 4: Query / SDV concern only
   else if (scores.queryBurden >= 2 || scores.sdv >= 2) {
     parts.push(`Enrolment is on track at ${enrollPct}, but data quality concerns require attention.`);
-    if (scores.queryBurden >= 2) {
-      parts.push(`There are ${latestQueriesAged} queries aged over 14 days unresolved.`);
-    }
-    if (scores.sdv >= 2 && latestSdvPct != null) {
-      parts.push(`SDV completion is ${pct(latestSdvPct)}, below the 80% acceptable threshold.`);
-    }
+    if (scores.queryBurden >= 2) parts.push(`There are ${latestQueriesAged} queries aged over 14 days unresolved.`);
+    if (scores.sdv >= 2 && latestSdvPct != null) parts.push(`SDV completion is ${pct(latestSdvPct)}.`);
   }
 
-  // Default
+  // Default amber/red fallback
   else {
-    parts.push(
-      `${site.rawName} is performing ${rag === 'green' ? 'well' : 'adequately'} with enrolment at ${enrollPct} of cumulative target.`
-    );
+    parts.push(`${site.rawName} has some concerns requiring monitoring — enrolment is at ${enrollPct} of cumulative target.`);
   }
 
-  // Secondary signals
-  if (scores.deviations >= 2) {
-    const devStr = deviationsTrend.join('→');
-    parts.push(`Protocol deviations are ${trendSignal.includes('deteriorat') || trendSignal === 'trending-worse' ? 'rising' : 'elevated'} (${devStr}).`);
+  // Secondary signals (only for non-green sites)
+  if (!isGreen) {
+    if (scores.deviations >= 2) {
+      const devStr = (deviationsTrend || []).join(' → ');
+      parts.push(`Protocol deviations are elevated${devStr ? ` (${devStr})` : ''}.`);
+    }
+
+    if (trendSignal === 'trending-worse' && scores.enrolment < 2 && scores.screenFailure < 3) {
+      parts.push(`Overall site performance has trended downward over the monitoring period.`);
+    }
+
+    if (persistentConcern) {
+      parts.push(`Risk has been persistently elevated for ${persistentConcern} consecutive month${persistentConcern !== 1 ? 's' : ''}.`);
+    }
+
+    if (craOverdue && lastMonitoringVisit) {
+      const d = lastMonitoringVisit instanceof Date ? lastMonitoringVisit : new Date(lastMonitoringVisit);
+      parts.push(`No CRA visit in ${daysWithoutVisit} days (last: ${formatDate(d)}).`);
+    } else if (craOverdue) {
+      parts.push(`No CRA monitoring visit on record — a site visit is overdue.`);
+    }
   }
 
-  if (trendSignal === 'trending-worse' && scores.enrolment < 2 && scores.screenFailure < 3) {
-    parts.push(`Overall site performance has trended downward over the monitoring period.`);
-  }
-
-  if (persistentConcern) {
-    parts.push(`Risk has been persistently elevated for ${persistentConcern} consecutive month${persistentConcern !== 1 ? 's' : ''} — this is not a transient issue.`);
-  }
-
-  if (craOverdue && lastMonitoringVisit) {
-    const d = lastMonitoringVisit instanceof Date ? lastMonitoringVisit : new Date(lastMonitoringVisit);
-    parts.push(`No CRA monitoring visit has been conducted in ${daysWithoutVisit} days (last visit: ${formatDate(d)}) — a site visit is overdue.`);
-  } else if (craOverdue) {
-    parts.push(`No CRA monitoring visit on record within the data period — a site visit is overdue.`);
-  }
-
-  // Modifier notes (leave, etc.)
+  // Modifier notes (leave etc.) — always include if present
   if (modifierNotes && modifierNotes.length > 0) {
     parts.push(modifierNotes.join(' '));
-  }
-
-  // Raw notes — convert objects to strings, never concatenate raw objects
-  const rawNoteTexts = (notes || []).map(noteText).filter(Boolean);
-  if (rawNoteTexts.length > 0) {
-    parts.push(rawNoteTexts.join(' '));
-  }
-
-  // Data quality flags
-  if (site.dataQualityFlags && site.dataQualityFlags.includes('target_imputed')) {
-    parts.push(`Note: one or more monthly targets were missing and have been imputed using the site's modal target value.`);
   }
 
   return parts.join(' ');

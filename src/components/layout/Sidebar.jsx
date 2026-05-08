@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../../store/AppContext';
-import { exportToFile } from '../../utils/storage';
 
 const icons = {
   dashboard: (
@@ -65,10 +64,6 @@ export default function Sidebar({ trialId }) {
     const next = !collapsed;
     setCollapsed(next);
     localStorage.setItem('sidebarCollapsed', String(next));
-  }
-
-  function handleExport() {
-    exportToFile(state);
   }
 
   return (
@@ -141,12 +136,7 @@ export default function Sidebar({ trialId }) {
         )}
       </nav>
 
-      <div className="sidebar-footer">
-        <button className="sidebar-footer-btn" onClick={handleExport}>
-          {icons.export}
-          <span className="sidebar-footer-btn-text">Export save file</span>
-        </button>
-      </div>
+      <div className="sidebar-footer" />
     </aside>
   );
 }

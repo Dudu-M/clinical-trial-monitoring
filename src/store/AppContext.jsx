@@ -12,8 +12,22 @@ const initialState = {
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'LOAD_STATE':
-      return action.payload;
+    case 'LOAD_STATE': {
+      // Deduplicate trials with the same name, keeping the most recently updated one.
+      // Guards against Strict Mode double-effect creating two auto-loaded trials.
+      const allTrials = Object.values(action.payload.trials || {});
+      const best = new Map();
+      for (const t of allTrials) {
+        const key = (t.name || t.id).toLowerCase().trim();
+        const prev = best.get(key);
+        if (!prev || (t.lastUpdated || '') > (prev.lastUpdated || '')) {
+          best.set(key, t);
+        }
+      }
+      const dedupedTrials = {};
+      for (const t of best.values()) dedupedTrials[t.id] = t;
+      return { ...action.payload, trials: dedupedTrials };
+    }
 
     case 'CREATE_TRIAL': {
       const trial = {

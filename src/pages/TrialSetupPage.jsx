@@ -131,7 +131,7 @@ export default function TrialSetupPage() {
   const hasCustomThresholds = JSON.stringify(thresholds) !== JSON.stringify(DEFAULT_THRESHOLDS);
 
   return (
-    <div style={{ maxWidth: 700 }}>
+    <div style={{ maxWidth: 640, margin: '0 auto' }}>
       <div className="page-header">
         <div className="page-header-left">
           <h1 className="page-title">{isEdit ? 'Trial Setup' : 'New Trial'}</h1>
