@@ -119,18 +119,30 @@ function StatGroups({ scored }) {
     },
     {
       key: 'cra',
-      card: (
-        <MetricCard
-          label="Last CRA Visit"
-          value={scored.lastMonitoringVisit
-            ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
-            : '—'}
-          sub={scored.daysWithoutVisit != null
-            ? `${scored.daysWithoutVisit}d ago${scored.craOverdue ? ' · overdue' : ''}`
-            : 'no visit recorded'}
-          level={craLevel}
-        />
-      ),
+      card: (() => {
+        const dateStr = scored.lastMonitoringVisit
+          ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+          : null;
+        const daysStr = scored.daysWithoutVisit != null ? `${scored.daysWithoutVisit} days ago` : null;
+        if (scored.craOverdue) {
+          return (
+            <MetricCard
+              label="CRA Monitoring Visit"
+              value="Overdue"
+              sub={dateStr ? `Last: ${dateStr}${daysStr ? ` · ${daysStr}` : ''}` : 'No visit on record'}
+              level="flagged"
+            />
+          );
+        }
+        return (
+          <MetricCard
+            label="CRA Monitoring Visit"
+            value={dateStr || '—'}
+            sub={daysStr || 'no visit recorded'}
+            level={craLevel}
+          />
+        );
+      })(),
     },
   ].filter(Boolean);
 

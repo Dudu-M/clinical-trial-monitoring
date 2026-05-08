@@ -206,6 +206,26 @@ export default function TrialSetupPage() {
           </div>
         </div>
 
+        {/* CRA monitoring threshold — always visible */}
+        <div className="card card-pad-lg" style={{ marginBottom: 20 }}>
+          <div className="section-title" style={{ marginBottom: 4 }}>CRA Monitoring Visit</div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 0, marginBottom: 16 }}>
+            Sites are flagged as overdue when no monitoring visit has been recorded within this many days.
+          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label className="form-label" style={{ margin: 0, whiteSpace: 'nowrap' }}>Flag as overdue after</label>
+            <input
+              type="number"
+              className="form-input"
+              style={{ width: 90, padding: '6px 8px', fontSize: 13 }}
+              value={thresholds.craOverdueDays}
+              min={1}
+              onChange={e => handleThresholdChange('craOverdueDays', null, Number(e.target.value))}
+            />
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>days without a visit</span>
+          </div>
+        </div>
+
         {/* Scoring thresholds */}
         <div className="card card-pad-lg" style={{ marginBottom: 20 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showThresholds ? 20 : 0 }}>
@@ -234,15 +254,17 @@ export default function TrialSetupPage() {
           {showThresholds && (
             <div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 32px' }}>
-                {Object.entries(THRESHOLD_LABELS).map(([dimKey, meta]) => (
-                  <ThresholdGroup
-                    key={dimKey}
-                    dimKey={dimKey}
-                    meta={meta}
-                    values={dimKey === 'craOverdueDays' ? thresholds.craOverdueDays : thresholds}
-                    onChange={handleThresholdChange}
-                  />
-                ))}
+                {Object.entries(THRESHOLD_LABELS)
+                  .filter(([dimKey]) => dimKey !== 'craOverdueDays')
+                  .map(([dimKey, meta]) => (
+                    <ThresholdGroup
+                      key={dimKey}
+                      dimKey={dimKey}
+                      meta={meta}
+                      values={thresholds}
+                      onChange={handleThresholdChange}
+                    />
+                  ))}
               </div>
               {hasCustomThresholds && (
                 <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
