@@ -646,8 +646,9 @@ export default function SiteDetailPage() {
       {/* Site header */}
       <div className="site-detail-header">
         <div className="site-detail-header-info">
-          <div className="site-detail-title">{scored.rawName}</div>
-          {scored.hospital && <div className="site-detail-sub">{scored.hospital}</div>}
+          <div className="site-detail-title">
+            {scored.rawName}{scored.hospital && <> &ndash; {scored.hospital}</>}
+          </div>
           {/* PI / CRC / Activated inline row */}
           {(scored.pi?.name || scored.coordinator?.name || scored.dateActivated) && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 20px', fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, marginBottom: 8 }}>
