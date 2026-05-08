@@ -316,17 +316,24 @@ export function parseExcel(arrayBuffer) {
       ? new Date(dateActivated.getFullYear(), dateActivated.getMonth(), 1)
       : null;
 
-    // Rule 3 — impute missing targets using modal value
+    // Rule 3 — impute missing targets
+    // Priority: if enrolled > 0, use enrolled as target; otherwise fall back to modal
     const allTargets = enrolMonths.map(m => m.target).filter(t => t != null);
     const modal = modalValue(allTargets);
-    let targetImputedFlag = false;
+    let modalImputedFlag = false;
     const filteredEnrolMonths = enrolMonths.map(m => {
-      if (m.target == null && modal != null) {
-        if (!targetImputedFlag) {
-          notices.push(`Data quality: ${id.replace('SITE-', 'Site ')} had a missing monthly target — imputed using modal target (${modal}).`);
-          targetImputedFlag = true;
+      if (m.target == null) {
+        if (m.enrolled != null && m.enrolled > 0) {
+          notices.push(`Data quality: ${id.replace('SITE-', 'Site ')} — missing target in ${m.month}, using enrolled count (${m.enrolled}) as target.`);
+          return { ...m, target: m.enrolled, targetImputed: true };
         }
-        return { ...m, target: modal, targetImputed: true };
+        if (modal != null) {
+          if (!modalImputedFlag) {
+            notices.push(`Data quality: ${id.replace('SITE-', 'Site ')} had a missing monthly target — imputed using modal target (${modal}).`);
+            modalImputedFlag = true;
+          }
+          return { ...m, target: modal, targetImputed: true };
+        }
       }
       return m;
     });
@@ -370,6 +377,12 @@ export function parseExcel(arrayBuffer) {
       ...activeEnrolMonths.flatMap(m => m.notes || []),
     ].filter(n => n && typeof n === 'string' && n.trim());
 
+    // noteHistory preserves month association for dashboard display
+    const noteHistory = [
+      ...(contact.notes || []).map(text => ({ text: String(text), month: null })),
+      ...activeEnrolMonths.flatMap(m => (m.notes || []).map(text => ({ text: String(text), month: m.month }))),
+    ].filter(n => n.text && n.text.trim());
+
     sites[id] = {
       id,
       rawName:   id.replace('SITE-', 'Site '),
@@ -380,6 +393,7 @@ export function parseExcel(arrayBuffer) {
       lastMonitoringVisit: lastVisit,
       months,
       notes: siteNotes,
+      noteHistory,
       dataQualityFlags: [],
     };
 

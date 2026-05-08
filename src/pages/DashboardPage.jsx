@@ -7,7 +7,10 @@ import DataQualityBanner from '../components/shared/DataQualityBanner';
 
 function pct(ratio) { return Math.round((ratio ?? 0) * 100) + '%'; }
 
-function TrendBadge({ signal }) {
+function TrendBadge({ signal, rag }) {
+  // Only show trend when it adds information: red/amber always; green only if improving
+  if (rag === 'green' && signal !== 'improving') return null;
+
   const map = {
     deteriorating:    { cls: 'trend-deteriorating',  label: '↓ Deteriorating' },
     'trending-worse': { cls: 'trend-trending-worse', label: '↘ Trending worse' },
@@ -18,6 +21,21 @@ function TrendBadge({ signal }) {
   return <span className={`trend-badge ${cls}`}>{label}</span>;
 }
 
+function PersistentFlag({ site }) {
+  if (!site.persistentConcern) return null;
+  const months = site.persistentConcernMonthLabels || [];
+  return (
+    <div className="persistent-tooltip">
+      <span className="flag-chip red">⚠ Persistent concern — {site.persistentConcern} months</span>
+      {months.length > 0 && (
+        <div className="persistent-tooltip-box">
+          High-risk score in: {months.join(', ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SiteCard({ site, rank, trialMeta }) {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -25,6 +43,7 @@ function SiteCard({ site, rank, trialMeta }) {
   const ragCardCls = site.rag === 'red' ? 'rag-red-card' : site.rag === 'amber' ? 'rag-amber-card' : 'rag-green-card';
   const scoreCls   = site.rag === 'red' ? 'red' : site.rag === 'amber' ? 'amber' : 'green';
   const headline   = generateHeadline(site, trialMeta);
+  const isAtRisk   = site.rag === 'red' || site.rag === 'amber';
 
   const sfPct    = Math.round((site.screenFailureRate || 0) * 100);
   const sdvPct   = site.latestSdvPct != null ? Math.round(site.latestSdvPct * 100) : null;
@@ -37,6 +56,9 @@ function SiteCard({ site, rank, trialMeta }) {
     { label: 'SDV', value: sdvPct != null ? sdvPct + '%' : '—', warn: sdvPct != null && sdvPct < 80 },
     { label: 'Deviations', value: devTrend, warn: false },
   ];
+
+  // Last 2 operational notes for at-risk sites
+  const recentNotes = isAtRisk ? (site.noteHistory || []).slice(-2) : [];
 
   return (
     <div
@@ -56,7 +78,7 @@ function SiteCard({ site, rank, trialMeta }) {
 
         <div className="site-rank-signals">
           <RagBadge status={site.rag === 'red' ? 'Red' : site.rag === 'amber' ? 'Amber' : 'Green'} />
-          <TrendBadge signal={site.trendSignal} />
+          <TrendBadge signal={site.trendSignal} rag={site.rag} />
           <span className={`site-rank-score ${scoreCls}`}>{site.scores?.total}</span>
           <span style={{ color: 'var(--text-muted)' }}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -67,11 +89,15 @@ function SiteCard({ site, rank, trialMeta }) {
       </div>
 
       {/* Flags row */}
-      {(site.persistentConcern || site.craOverdue || (site.modifierFlags && site.modifierFlags.length > 0)) && (
+      {(site.craOverdue || (site.modifierFlags && site.modifierFlags.length > 0)) && (
         <div style={{ padding: '0 20px 10px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {site.modifierFlags && site.modifierFlags.map((f, i) => (
-            <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
-          ))}
+          {site.modifierFlags && site.modifierFlags.map((f, i) =>
+            f.includes('Persistent') ? (
+              <PersistentFlag key={i} site={site} />
+            ) : (
+              <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
+            )
+          )}
           {site.craOverdue && !site.modifierFlags?.some(f => f.includes('CRA')) && (
             <span className="flag-chip amber">CRA visit overdue</span>
           )}
@@ -92,6 +118,19 @@ function SiteCard({ site, rank, trialMeta }) {
           </div>
         ))}
       </div>
+
+      {/* Operational notes — last 2, at-risk sites only */}
+      {recentNotes.length > 0 && (
+        <div className="site-card-notes">
+          <div className="site-card-notes-label">Recent notes</div>
+          {recentNotes.map((n, i) => (
+            <div key={i} className="site-card-note">
+              {n.month && <span className="site-card-note-month">{n.month}</span>}
+              <span className="site-card-note-text">{n.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -138,32 +177,38 @@ export default function DashboardPage() {
   const trialMeta = buildTrialMeta(trial);
   const rankedSites = hasSites ? scoreSites(trial.sites, trialMeta) : [];
 
-  // Metrics
   const totalEnrolled = rankedSites.reduce((s, site) => s + (site.enrolmentSummary?.cumEnrolled || 0), 0);
+  const remaining     = (trial.totalTarget || 0) - totalEnrolled;
   const pctOfTarget   = trial.totalTarget ? Math.round((totalEnrolled / trial.totalTarget) * 100) : null;
-  const activeSites   = rankedSites.filter(s => s.months && s.months.length > 0).length;
-  // Use months remaining direct from sheet if available; fall back to date calculation
+
   const monthsRemaining = trial.monthsRemainingFromSheet != null
     ? trial.monthsRemainingFromSheet
     : monthsRemainingFrom(trial.targetCompletionDate);
 
-  // Total months of data (from first to last month across all sites)
   const allMonthDates = Object.values(trial.sites || {}).flatMap(s => (s.months || []).map(m => new Date(m.date)));
-  const uniqueMonths = allMonthDates.length > 0
+  const uniqueMonths  = allMonthDates.length > 0
     ? new Set(allMonthDates.map(d => `${d.getFullYear()}-${d.getMonth()}`)).size
     : 1;
 
-  // Current run rate = total enrolled / months of data (per the spec: 72/3 = 24)
-  const currentRunRate = uniqueMonths > 0 ? (totalEnrolled / uniqueMonths).toFixed(1) : null;
-
-  // Required run rate: from trial setup field, or computed
+  const currentRunRate  = uniqueMonths > 0 ? (totalEnrolled / uniqueMonths).toFixed(1) : null;
   const requiredRunRate = trial.requiredRunRate
     || (monthsRemaining && trial.totalTarget
       ? ((trial.totalTarget - totalEnrolled) / Math.max(1, monthsRemaining)).toFixed(1)
       : null);
 
+  const isOnTrack = currentRunRate && requiredRunRate && Number(currentRunRate) >= Number(requiredRunRate);
+
   const redSites   = rankedSites.filter(s => s.rag === 'red').length;
   const amberSites = rankedSites.filter(s => s.rag === 'amber').length;
+  const greenSites = rankedSites.length - redSites - amberSites;
+
+  const dataRange = (() => {
+    if (allMonthDates.length === 0) return '';
+    const lo = new Date(Math.min(...allMonthDates));
+    const hi = new Date(Math.max(...allMonthDates));
+    const fmt = d => d.toLocaleString('en-GB', { month: 'short', year: 'numeric' });
+    return lo.getTime() === hi.getTime() ? fmt(lo) : `${fmt(lo)} – ${fmt(hi)}`;
+  })();
 
   return (
     <div>
@@ -172,6 +217,7 @@ export default function DashboardPage() {
           <h1 className="page-title">{trial.name}</h1>
           <p className="text-secondary" style={{ marginTop: 4, fontSize: 13 }}>
             {trial.sponsor}{trial.indication ? ` · ${trial.indication}` : ''}
+            {dataRange && <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>· {dataRange}</span>}
           </p>
         </div>
         <div className="page-header-actions">
@@ -194,70 +240,79 @@ export default function DashboardPage() {
 
       <DataQualityBanner notices={trial.dataQualityNotices} />
 
-      {/* Trial metric strip */}
+      {/* Trial stat bar */}
       {hasSites && (
-        <div className="metric-strip">
-          <div className="metric-card">
-            <div className="label metric-card-label">Active Sites</div>
-            <div className="metric-card-value">{activeSites}</div>
-            <div className="metric-card-sub">{rankedSites.length} total</div>
-          </div>
-
-          <div className="metric-card">
-            <div className="label metric-card-label">Enrolled to Date</div>
-            <div className="metric-card-value">{totalEnrolled}</div>
-            <div className="metric-card-sub">of {trial.totalTarget || '—'} target</div>
-          </div>
-
-          {pctOfTarget !== null && (
-            <div className={`metric-card ${pctOfTarget >= 90 ? 'good' : pctOfTarget >= 70 ? '' : 'warn'}`}>
-              <div className="label metric-card-label">% of Target</div>
-              <div className="metric-card-value">{pctOfTarget}%</div>
-              <div className="metric-card-sub">cumulative</div>
+        <div className="trial-stat-bar">
+          <div className="trial-stat">
+            <div className="trial-stat-label">Enrolled</div>
+            <div className="trial-stat-value">
+              {totalEnrolled}<span className="trial-stat-total">/{trial.totalTarget || '—'}</span>
             </div>
-          )}
+            {pctOfTarget !== null && (
+              <div className="trial-stat-sub">{pctOfTarget}% of target</div>
+            )}
+          </div>
+
+          <div className="trial-stat-divider" />
+
+          <div className="trial-stat">
+            <div className="trial-stat-label">Remaining</div>
+            <div className="trial-stat-value">{Math.max(0, remaining)}</div>
+            <div className="trial-stat-sub">patients to target</div>
+          </div>
 
           {monthsRemaining !== null && (
-            <div className={`metric-card ${monthsRemaining > 3 ? '' : monthsRemaining > 1 ? 'warn' : 'bad'}`}>
-              <div className="label metric-card-label">Months Remaining</div>
-              <div className="metric-card-value">{monthsRemaining}</div>
-              <div className="metric-card-sub">to completion</div>
-            </div>
-          )}
-
-          {requiredRunRate && (
-            <div className="metric-card">
-              <div className="label metric-card-label">Required Rate</div>
-              <div className="metric-card-value">{requiredRunRate}</div>
-              <div className="metric-card-sub">pts/month needed</div>
-            </div>
+            <>
+              <div className="trial-stat-divider" />
+              <div className={`trial-stat ${monthsRemaining <= 1 ? 'bad' : monthsRemaining <= 3 ? 'warn' : ''}`}>
+                <div className="trial-stat-label">Months Left</div>
+                <div className="trial-stat-value">{monthsRemaining}</div>
+                <div className="trial-stat-sub">to completion</div>
+              </div>
+            </>
           )}
 
           {currentRunRate && (
-            <div className={`metric-card ${Number(currentRunRate) >= Number(requiredRunRate || 0) ? 'good' : 'bad'}`}>
-              <div className="label metric-card-label">Current Rate</div>
-              <div className="metric-card-value">{currentRunRate}</div>
-              <div className="metric-card-sub">pts/month actual</div>
-            </div>
+            <>
+              <div className="trial-stat-divider" />
+              <div className={`trial-stat ${isOnTrack ? 'good' : 'bad'}`}>
+                <div className="trial-stat-label">Current Rate</div>
+                <div className="trial-stat-value">{currentRunRate}<span className="trial-stat-unit">/mo</span></div>
+                <div className="trial-stat-sub">actual enrolment</div>
+              </div>
+            </>
           )}
 
-          <div className="metric-card">
-            <div className="label metric-card-label">Site RAG</div>
-            <div style={{ marginTop: 6, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {redSites > 0 && (
-                <span><span style={{ color: 'var(--red)', fontWeight: 700, fontSize: 22 }}>{redSites}</span>
-                  <span style={{ fontSize: 11, color: 'var(--red)', marginLeft: 3 }}>Red</span></span>
-              )}
-              {amberSites > 0 && (
-                <span><span style={{ color: 'var(--amber)', fontWeight: 700, fontSize: 22 }}>{amberSites}</span>
-                  <span style={{ fontSize: 11, color: 'var(--amber)', marginLeft: 3 }}>Amber</span></span>
-              )}
-              {redSites === 0 && amberSites === 0 && (
-                <span><span style={{ color: 'var(--green)', fontWeight: 700, fontSize: 22 }}>All</span>
-                  <span style={{ fontSize: 11, color: 'var(--green)', marginLeft: 3 }}>Green</span></span>
-              )}
+          {requiredRunRate && (
+            <>
+              <div className="trial-stat-divider" />
+              <div className="trial-stat">
+                <div className="trial-stat-label">Required Rate</div>
+                <div className="trial-stat-value">{requiredRunRate}<span className="trial-stat-unit">/mo</span></div>
+                <div className="trial-stat-sub">to hit target</div>
+              </div>
+            </>
+          )}
+
+          {currentRunRate && requiredRunRate && (
+            <>
+              <div className="trial-stat-divider" />
+              <div className="trial-stat" style={{ flex: '0 0 auto' }}>
+                <div className="trial-stat-label">&nbsp;</div>
+                <div className={`trial-stat-track ${isOnTrack ? 'on-track' : 'off-track'}`}>
+                  {isOnTrack ? '↑ On track' : '↓ Off track'}
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="trial-stat-rag">
+            <div className="trial-stat-label">Site RAG</div>
+            <div className="trial-stat-rag-pills">
+              {redSites > 0   && <span className="rag-pill red">{redSites} Red</span>}
+              {amberSites > 0 && <span className="rag-pill amber">{amberSites} Amber</span>}
+              {greenSites > 0 && <span className="rag-pill green">{greenSites} Green</span>}
             </div>
-            <div className="metric-card-sub">site performance</div>
           </div>
         </div>
       )}

@@ -24,6 +24,175 @@ function buildTrialMeta(trial) {
 
 function pct(ratio) { return Math.round((ratio ?? 0) * 100) + '%'; }
 
+// ── Grouped stats helpers ────────────────────────────────────────
+function scoreLevel(score) {
+  if (score >= 3) return 'flagged';
+  if (score >= 1) return 'watch';
+  return 'ok';
+}
+
+function StatGroup({ level, children }) {
+  const labels   = { flagged: 'Flagged', watch: 'Watch', ok: 'OK' };
+  const clsMap   = { flagged: 'stat-group-red', watch: 'stat-group-amber', ok: 'stat-group-green' };
+  const items = Array.isArray(children) ? children.filter(Boolean) : [children].filter(Boolean);
+  if (items.length === 0) return null;
+  return (
+    <div className={`stat-group ${clsMap[level]}`}>
+      <div className="stat-group-label">{labels[level]}</div>
+      <div className="stat-group-cards">{items}</div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, sub, level, style }) {
+  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : 'good';
+  return (
+    <div className={`metric-card ${colorCls}`} style={style}>
+      <div className="label metric-card-label">{label}</div>
+      <div className="metric-card-value">{value}</div>
+      {sub && <div className="metric-card-sub">{sub}</div>}
+    </div>
+  );
+}
+
+function EnrolmentCard({ summary, score }) {
+  const level = scoreLevel(score);
+  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : 'good';
+  return (
+    <div className={`metric-card ${colorCls}`}>
+      <div className="label metric-card-label">Enrolment</div>
+      <div className="metric-card-value">{pct(summary.ratio)}</div>
+      <div className="metric-card-sub">{summary.cumEnrolled} of {summary.cumTarget} target</div>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        <span style={{ fontSize: 16, fontWeight: 700 }}>{summary.runRate.toFixed(1)}</span>
+        <span className="metric-card-sub">pts/month avg</span>
+      </div>
+    </div>
+  );
+}
+
+function CraCard({ lastMonitoringVisit, daysWithoutVisit, craOverdue }) {
+  const level = craOverdue ? 'flagged' : (daysWithoutVisit != null && daysWithoutVisit > 30) ? 'watch' : 'ok';
+  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : '';
+  return (
+    <div className={`metric-card ${colorCls}`}>
+      <div className="label metric-card-label">Last CRA Visit</div>
+      {lastMonitoringVisit ? (
+        <>
+          <div className="metric-card-value" style={{ fontSize: 16 }}>
+            {new Date(lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
+          </div>
+          <div className="metric-card-sub">
+            {daysWithoutVisit != null ? `${daysWithoutVisit}d ago` : ''}
+            {craOverdue ? ' · overdue' : ''}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="metric-card-value" style={{ fontSize: 22 }}>—</div>
+          <div className="metric-card-sub">no visit recorded</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StatGroups({ scored }) {
+  const s = scored.scores || {};
+
+  // Each metric: { key, level, card }
+  const metrics = [
+    {
+      key: 'enrol',
+      level: scoreLevel(s.enrolment ?? 0),
+      card: scored.enrolmentSummary && (
+        <EnrolmentCard key="enrol" summary={scored.enrolmentSummary} score={s.enrolment ?? 0} />
+      ),
+    },
+    scored.screenFailureRate > 0 && {
+      key: 'sf',
+      level: scoreLevel(s.screenFailure ?? 0),
+      card: (
+        <MetricCard
+          key="sf"
+          label="Screen Failure"
+          value={pct(scored.screenFailureRate)}
+          sub="of screened"
+          level={scoreLevel(s.screenFailure ?? 0)}
+        />
+      ),
+    },
+    scored.latestSdvPct != null && {
+      key: 'sdv',
+      level: scoreLevel(s.sdv ?? 0),
+      card: (
+        <MetricCard
+          key="sdv"
+          label="SDV"
+          value={pct(scored.latestSdvPct)}
+          sub="latest month"
+          level={scoreLevel(s.sdv ?? 0)}
+        />
+      ),
+    },
+    {
+      key: 'queries',
+      level: scoreLevel(s.queryBurden ?? 0),
+      card: (
+        <MetricCard
+          key="queries"
+          label="Aged Queries"
+          value={scored.latestQueriesAged || 0}
+          sub=">14 days"
+          level={scoreLevel(s.queryBurden ?? 0)}
+        />
+      ),
+    },
+    scored.deviationsTrend && scored.deviationsTrend.some(d => d > 0) && {
+      key: 'dev',
+      level: scoreLevel(s.deviations ?? 0),
+      card: (
+        <MetricCard
+          key="dev"
+          label="Deviations"
+          value={scored.deviationsTrend[scored.deviationsTrend.length - 1]}
+          sub={scored.deviationsTrend.join(' → ')}
+          level={scoreLevel(s.deviations ?? 0)}
+        />
+      ),
+    },
+    {
+      key: 'cra',
+      level: scored.craOverdue ? 'flagged'
+        : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
+        : 'ok',
+      card: (
+        <CraCard
+          key="cra"
+          lastMonitoringVisit={scored.lastMonitoringVisit}
+          daysWithoutVisit={scored.daysWithoutVisit}
+          craOverdue={scored.craOverdue}
+        />
+      ),
+    },
+  ].filter(Boolean);
+
+  const groups = {
+    flagged: metrics.filter(m => m.level === 'flagged'),
+    watch:   metrics.filter(m => m.level === 'watch'),
+    ok:      metrics.filter(m => m.level === 'ok'),
+  };
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <StatGroup level="flagged">{groups.flagged.map(m => m.card)}</StatGroup>
+      <StatGroup level="watch">{groups.watch.map(m => m.card)}</StatGroup>
+      <StatGroup level="ok">{groups.ok.map(m => m.card)}</StatGroup>
+    </div>
+  );
+}
+
+// ── Score breakdown ──────────────────────────────────────────────
 function ScoreBreakdown({ scores }) {
   const dims = [
     { key: 'enrolment',     label: 'Enrolment' },
@@ -59,6 +228,7 @@ function ScoreBreakdown({ scores }) {
   );
 }
 
+// ── Monthly data table ───────────────────────────────────────────
 function MonthTable({ months }) {
   const hasVisitDates = months.some(m => m.monitoringVisitDate);
   return (
@@ -103,6 +273,7 @@ function MonthTable({ months }) {
   );
 }
 
+// ── Notes sections ───────────────────────────────────────────────
 function NotesIntelligence({ notes }) {
   const analysed = analyseNotes(notes);
   if (analysed.length === 0) {
@@ -130,7 +301,6 @@ function UserNotesSection({ trialId, siteId, notes }) {
   const { actions } = useAppStore();
   const [text, setText] = useState('');
 
-  // Only user-added notes are objects
   const userNotes = (notes || []).filter(n => n && typeof n === 'object');
 
   function handleSubmit(e) {
@@ -176,6 +346,7 @@ function UserNotesSection({ trialId, siteId, notes }) {
   );
 }
 
+// ── Email sections ───────────────────────────────────────────────
 function EmailSection({ site, trialMeta, trialId, siteId }) {
   const { actions } = useAppStore();
   const { subject, body, toEmail } = generateEmail(site, trialMeta);
@@ -237,6 +408,7 @@ function EmailLogSection({ emailLog }) {
   );
 }
 
+// ── Main page ────────────────────────────────────────────────────
 export default function SiteDetailPage() {
   const { id, siteId } = useParams();
   const navigate = useNavigate();
@@ -257,7 +429,7 @@ export default function SiteDetailPage() {
   const rawSite = trial.sites[siteId];
   const scored = scoreSites(trial.sites, trialMeta).find(s => s.id === siteId) || rawSite;
 
-  const summary = generateSummary(scored, trialMeta);
+  const summary  = generateSummary(scored, trialMeta);
   const ragLabel = scored.rag === 'red' ? 'Red' : scored.rag === 'amber' ? 'Amber' : 'Green';
 
   const trendMap = {
@@ -267,8 +439,9 @@ export default function SiteDetailPage() {
     improving:        '↑ Improving',
   };
 
-  // All notes: string notes from Excel + object notes from UI
-  const allNotes = rawSite.notes || [];
+  const showTrend = scored.rag !== 'green' || scored.trendSignal === 'improving';
+
+  const allNotes   = rawSite.notes || [];
   const stringNotes = allNotes.filter(n => typeof n === 'string');
 
   const tabs = [
@@ -282,7 +455,6 @@ export default function SiteDetailPage() {
 
   return (
     <div>
-      {/* Back link */}
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, marginLeft: -8 }} onClick={() => navigate(`/trial/${id}`)}>
         ← Back to Dashboard
       </button>
@@ -294,14 +466,25 @@ export default function SiteDetailPage() {
           {scored.hospital && <div className="site-detail-sub">{scored.hospital}</div>}
           <div className="site-detail-badges">
             <RagBadge status={ragLabel} score={scored.scores?.total} />
-            {scored.trendSignal && (
+            {showTrend && scored.trendSignal && (
               <span className={`trend-badge trend-${scored.trendSignal}`}>
                 {trendMap[scored.trendSignal] || scored.trendSignal}
               </span>
             )}
-            {scored.modifierFlags && scored.modifierFlags.map((f, i) => (
-              <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
-            ))}
+            {scored.modifierFlags && scored.modifierFlags.map((f, i) =>
+              f.includes('Persistent') ? (
+                <div key={i} className="persistent-tooltip">
+                  <span className="flag-chip red">{f}</span>
+                  {scored.persistentConcernMonthLabels && scored.persistentConcernMonthLabels.length > 0 && (
+                    <div className="persistent-tooltip-box">
+                      High-risk score in: {scored.persistentConcernMonthLabels.join(', ')}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
+              )
+            )}
             {scored.craOverdue && (
               <span className="flag-chip amber">CRA visit overdue</span>
             )}
@@ -335,10 +518,10 @@ export default function SiteDetailPage() {
       {/* Tab: Overview */}
       {activeTab === 'overview' && (
         <div>
-          <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
-            <p style={{ fontSize: 13, lineHeight: 1.7 }}>{summary}</p>
-          </div>
+          {/* Stats grouped by status — first */}
+          <StatGroups scored={scored} />
+
+          {/* Score breakdown */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
             <div className="section-title" style={{ marginBottom: 12 }}>
               Score Breakdown
@@ -346,73 +529,11 @@ export default function SiteDetailPage() {
             </div>
             {scored.scores && <ScoreBreakdown scores={scored.scores} />}
           </div>
-          <div className="metric-strip">
-            {scored.enrolmentSummary && (
-              <>
-                <div className="metric-card">
-                  <div className="label metric-card-label">Enrolled</div>
-                  <div className="metric-card-value">{scored.enrolmentSummary.cumEnrolled}</div>
-                  <div className="metric-card-sub">of {scored.enrolmentSummary.cumTarget} target</div>
-                </div>
-                <div className={`metric-card ${scored.enrolmentSummary.ratio >= 0.9 ? 'good' : scored.enrolmentSummary.ratio >= 0.75 ? '' : 'warn'}`}>
-                  <div className="label metric-card-label">Enrolment</div>
-                  <div className="metric-card-value">{pct(scored.enrolmentSummary.ratio)}</div>
-                  <div className="metric-card-sub">of cumulative target</div>
-                </div>
-                <div className="metric-card">
-                  <div className="label metric-card-label">Run Rate</div>
-                  <div className="metric-card-value">{scored.enrolmentSummary.runRate.toFixed(1)}</div>
-                  <div className="metric-card-sub">pts/month avg</div>
-                </div>
-              </>
-            )}
-            {scored.screenFailureRate > 0 && (
-              <div className={`metric-card ${scored.screenFailureRate >= 0.5 ? 'bad' : scored.screenFailureRate >= 0.3 ? 'warn' : 'good'}`}>
-                <div className="label metric-card-label">Screen Failure</div>
-                <div className="metric-card-value">{pct(scored.screenFailureRate)}</div>
-                <div className="metric-card-sub">of screened</div>
-              </div>
-            )}
-            {scored.latestSdvPct != null && (
-              <div className={`metric-card ${scored.latestSdvPct >= 0.9 ? 'good' : scored.latestSdvPct >= 0.8 ? '' : 'warn'}`}>
-                <div className="label metric-card-label">SDV</div>
-                <div className="metric-card-value">{pct(scored.latestSdvPct)}</div>
-                <div className="metric-card-sub">latest month</div>
-              </div>
-            )}
-            {scored.latestQueriesAged > 0 && (
-              <div className={`metric-card ${scored.latestQueriesAged > 8 ? 'bad' : scored.latestQueriesAged > 3 ? 'warn' : ''}`}>
-                <div className="label metric-card-label">Aged Queries</div>
-                <div className="metric-card-value">{scored.latestQueriesAged}</div>
-                <div className="metric-card-sub">&gt;14 days</div>
-              </div>
-            )}
-            {scored.deviationsTrend && scored.deviationsTrend.some(d => d > 0) && (
-              <div className={`metric-card ${scored.scores?.deviations >= 2 ? 'bad' : scored.scores?.deviations >= 1 ? 'warn' : ''}`}>
-                <div className="label metric-card-label">Deviations</div>
-                <div className="metric-card-value">{scored.deviationsTrend[scored.deviationsTrend.length - 1]}</div>
-                <div className="metric-card-sub">{scored.deviationsTrend.join(' → ')} trend</div>
-              </div>
-            )}
-            <div className={`metric-card ${scored.craOverdue ? 'bad' : ''}`}>
-              <div className="label metric-card-label">Last CRA Visit</div>
-              {scored.lastMonitoringVisit ? (
-                <>
-                  <div className="metric-card-value" style={{ fontSize: 16 }}>
-                    {new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
-                  </div>
-                  <div className="metric-card-sub">
-                    {scored.daysWithoutVisit != null ? `${scored.daysWithoutVisit}d ago` : ''}
-                    {scored.craOverdue ? ' · overdue' : ''}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="metric-card-value" style={{ fontSize: 22 }}>—</div>
-                  <div className="metric-card-sub">no visit recorded</div>
-                </>
-              )}
-            </div>
+
+          {/* Why flagged */}
+          <div className="card card-pad">
+            <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
+            <p style={{ fontSize: 13, lineHeight: 1.7 }}>{summary}</p>
           </div>
         </div>
       )}
@@ -426,7 +547,7 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Tab: Operational notes (from data source) */}
+      {/* Tab: Operational notes */}
       {activeTab === 'notes' && (
         <div className="card card-pad">
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14 }}>
@@ -436,7 +557,7 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Tab: Team notes (user-added) */}
+      {/* Tab: Team notes */}
       {activeTab === 'team' && (
         <div className="card card-pad">
           <UserNotesSection trialId={id} siteId={siteId} notes={rawSite.notes || []} />

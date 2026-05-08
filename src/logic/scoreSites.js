@@ -109,18 +109,27 @@ function trendSignal(months) {
 }
 
 function persistentConcernMonths(months) {
-  if (months.length < 2) return null;
+  if (months.length < 2) return { count: null, labels: [] };
   let maxConsecutive = 0;
   let current = 0;
+  let currentLabels = [];
+  let bestLabels = [];
   for (const m of months) {
     if (scoreMonthSnapshot(m) >= 6) {
       current++;
-      maxConsecutive = Math.max(maxConsecutive, current);
+      currentLabels.push(m.month);
+      if (current > maxConsecutive) {
+        maxConsecutive = current;
+        bestLabels = [...currentLabels];
+      }
     } else {
       current = 0;
+      currentLabels = [];
     }
   }
-  return maxConsecutive >= 2 ? maxConsecutive : null;
+  return maxConsecutive >= 2
+    ? { count: maxConsecutive, labels: bestLabels }
+    : { count: null, labels: [] };
 }
 
 function extractNoteText(note) {
@@ -160,7 +169,9 @@ export function scoreSites(sites, trialMeta) {
     const baseTotal = scores.enrolment + scores.screenFailure + scores.queryBurden + scores.sdv + scores.deviations;
 
     const trend = trendSignal(months);
-    const persistent = persistentConcernMonths(months);
+    const persistentResult = persistentConcernMonths(months);
+    const persistent = persistentResult.count;
+    const persistentConcernMonthLabels = persistentResult.labels;
 
     const lastVisit = site.lastMonitoringVisit;
     const daysWithoutVisit = lastVisit
@@ -225,6 +236,7 @@ export function scoreSites(sites, trialMeta) {
       modifierNotes,
       isNewlyActivated,
       onLeave,
+      persistentConcernMonthLabels,
     };
   });
 
