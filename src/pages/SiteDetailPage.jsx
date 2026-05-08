@@ -31,24 +31,32 @@ function scoreLevel(score) {
 }
 
 
-// Returns 'up' (improving), 'down' (worsening), or 'stable' based on last 3 non-null values.
-// higherIsBetter: true for SDV (high % = good), false for queries/deviations/SF rate (low = good)
-function metricTrend(values, higherIsBetter) {
+// Returns { direction: 'up'|'down'|null, display: string } based on last 3 non-null values.
+// higherIsBetter: true for SDV, false for SF rate / queries / deviations.
+// isPercent: true → display as e.g. "5%", false → display as integer.
+function metricTrendDelta(values, higherIsBetter, isPercent = false) {
   const clean = (values || []).filter(v => v != null && !isNaN(v));
   const recent = clean.slice(-3);
-  if (recent.length < 2) return 'stable';
+  if (recent.length < 2) return null;
   const first = recent[0];
   const last  = recent[recent.length - 1];
-  if (first === last) return 'stable';
-  const improving = higherIsBetter ? last > first : last < first;
-  return improving ? 'up' : 'down';
+  const rawDelta = last - first;
+  if (rawDelta === 0) return null;
+  const improving = higherIsBetter ? rawDelta > 0 : rawDelta < 0;
+  const abs = Math.abs(rawDelta);
+  const display = isPercent
+    ? `${Math.round(abs * 100)}%`
+    : (Number.isInteger(abs) ? String(abs) : abs.toFixed(1));
+  return { direction: improving ? 'up' : 'down', display };
 }
 
-function TrendArrow({ trend }) {
-  if (!trend || trend === 'stable') return null;
+function TrendDelta({ trend }) {
+  if (!trend) return null;
+  const color = trend.direction === 'up' ? 'var(--green)' : 'var(--red)';
+  const arrow = trend.direction === 'up' ? '↑' : '↓';
   return (
-    <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, color: trend === 'up' ? 'var(--green)' : 'var(--red)' }}>
-      {trend === 'up' ? '↑' : '↓'}
+    <span style={{ fontSize: 13, fontWeight: 600, color, whiteSpace: 'nowrap' }}>
+      {arrow} {trend.display}
     </span>
   );
 }
@@ -61,17 +69,15 @@ function MetricCard({ label, value, sub, level, sub2, trend }) {
                : level === 'watch'   ? 'var(--amber-border)'
                : 'var(--border)';
   return (
-    <div className="metric-card" style={{ borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '14px 14px' }}>
+    <div className="metric-card" style={{ borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '12px 14px' }}>
       <div className="label metric-card-label">{label}</div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
         <div className="metric-card-value" style={{ color: valueColor }}>{value}</div>
-        <TrendArrow trend={trend} />
+        <TrendDelta trend={trend} />
       </div>
-      {sub && <div className="metric-card-sub">{sub}</div>}
+      {sub && <div className="metric-card-sub" style={{ marginTop: 3 }}>{sub}</div>}
       {sub2 && (
-        <div className="metric-card-sub" style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-          {sub2}
-        </div>
+        <div className="metric-card-sub" style={{ marginTop: 4 }}>{sub2}</div>
       )}
     </div>
   );
@@ -87,11 +93,11 @@ function StatGroups({ scored }) {
   const sfTotal = totalFailed + totalEnrolled;
   const sfSub = sfTotal > 0 ? `${totalFailed} failed / ${sfTotal} screened · cumulative` : 'of screened';
 
-  // Trends (last 3 months) — not shown for enrolment or CRA
-  const sfTrend    = metricTrend(months.map(m => { const d = (m.enrolled ?? 0) + (m.screenFailures ?? 0); return d > 0 ? (m.screenFailures ?? 0) / d : null; }), false);
-  const sdvTrend   = metricTrend(months.map(m => m.sdvPct), true);
-  const queryTrend = metricTrend(months.map(m => m.queriesAged), false);
-  const devTrend2  = metricTrend(months.map(m => m.deviations ?? 0), false);
+  // Trend deltas (last 3 months) — not shown for enrolment or CRA
+  const sfTrend    = metricTrendDelta(months.map(m => { const d = (m.enrolled ?? 0) + (m.screenFailures ?? 0); return d > 0 ? (m.screenFailures ?? 0) / d : null; }), false, true);
+  const sdvTrend   = metricTrendDelta(months.map(m => m.sdvPct), true, true);
+  const queryTrend = metricTrendDelta(months.map(m => m.queriesAged), false, false);
+  const devTrend2  = metricTrendDelta(months.map(m => m.deviations ?? 0), false, false);
 
   const craLevel = scored.craOverdue ? 'flagged'
     : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
@@ -244,40 +250,69 @@ function InsightCard({ insight, onTabSwitch }) {
 }
 
 function WhyCard({ scored, summary, insights, stringNotes, onTabSwitch }) {
-  const [showInsights, setShowInsights] = useState(false);
-
   const analysed = analyseNotes(stringNotes);
+
+  // Unique actions derived from insights that link to a tab
+  const actions = insights
+    .filter(ins => ins.linkTab && ins.linkLabel)
+    .filter((ins, i, arr) => arr.findIndex(a => a.linkLabel === ins.linkLabel) === i);
+
+  const hasInsights = insights.length > 0;
 
   return (
     <div className="card card-pad" style={{ marginBottom: 16 }}>
-      <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
 
-      {/* Summary paragraph */}
-      <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--text-primary)' }}>{summary}</p>
+      {/* No insights: green/ok site — just show the summary */}
+      {!hasInsights && (
+        <p style={{ fontSize: 13, lineHeight: 1.75, color: 'var(--text-primary)', margin: 0 }}>{summary}</p>
+      )}
 
-      {/* Collapsible suggested actions */}
-      {insights.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            style={{ padding: '4px 0', fontWeight: 600, color: 'var(--navy-mid)' }}
-            onClick={() => setShowInsights(v => !v)}
-          >
-            {showInsights
-              ? '↑ Hide suggested actions'
-              : `↓ ${insights.length} suggested action${insights.length !== 1 ? 's' : ''}`}
-          </button>
-          {showInsights && (
-            <div style={{ marginTop: 10 }}>
+      {/* Insights present: two-column layout */}
+      {hasInsights && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 32, alignItems: 'start' }}>
+
+          {/* Left — Operational Signals */}
+          <div>
+            <div className="section-title" style={{ marginBottom: 12 }}>Operational Signals</div>
+            <div>
               {insights.map((ins, i) => (
                 <InsightCard key={i} insight={ins} onTabSwitch={onTabSwitch} />
               ))}
+            </div>
+          </div>
+
+          {/* Right — Actions */}
+          {actions.length > 0 && (
+            <div style={{ minWidth: 200 }}>
+              <div className="section-title" style={{ marginBottom: 12 }}>Actions</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {actions.map((ins, i) => (
+                  <button
+                    key={i}
+                    onClick={() => onTabSwitch(ins.linkTab)}
+                    style={{
+                      textAlign: 'left',
+                      background: 'none',
+                      border: 'none',
+                      borderBottom: '1px solid var(--border)',
+                      padding: '9px 0',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: 'var(--navy-mid)',
+                      cursor: 'pointer',
+                      width: '100%',
+                    }}
+                  >
+                    {ins.linkLabel}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* Operational notes — separate, only if not already folded into summary */}
+      {/* Operational notes from data — always at bottom, separated */}
       {analysed.length > 0 && (
         <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
           <div className="label" style={{ marginBottom: 10 }}>Operational notes from data</div>
@@ -599,6 +634,22 @@ export default function SiteDetailPage() {
         <div className="site-detail-header-info">
           <div className="site-detail-title">{scored.rawName}</div>
           {scored.hospital && <div className="site-detail-sub">{scored.hospital}</div>}
+          {/* PI / CRC / Activated inline row */}
+          {(scored.pi?.name || scored.coordinator?.name || scored.dateActivated) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0 20px', fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, marginBottom: 8 }}>
+              {scored.pi?.name && (
+                <span><span style={{ fontWeight: 600 }}>PI:</span> {scored.pi.name}</span>
+              )}
+              {scored.coordinator?.name && (
+                <span><span style={{ fontWeight: 600 }}>CRC:</span> {scored.coordinator.name}</span>
+              )}
+              {scored.dateActivated && (
+                <span><span style={{ fontWeight: 600 }}>Activated:</span>{' '}
+                  {new Date(scored.dateActivated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </span>
+              )}
+            </div>
+          )}
           <div className="site-detail-badges">
             <RagBadge status={ragLabel} score={scored.scores?.total} />
             {showTrend && scored.trendSignal && (
@@ -626,16 +677,6 @@ export default function SiteDetailPage() {
               </span>
             )}
           </div>
-        </div>
-        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 5, fontSize: 12, color: 'var(--text-secondary)' }}>
-          {scored.pi?.name && <div><span style={{ fontWeight: 600 }}>PI:</span> {scored.pi.name}</div>}
-          {scored.coordinator?.name && <div><span style={{ fontWeight: 600 }}>CRC:</span> {scored.coordinator.name}</div>}
-          {scored.dateActivated && (
-            <div>
-              <span style={{ fontWeight: 600 }}>Activated:</span>{' '}
-              {new Date(scored.dateActivated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
-            </div>
-          )}
         </div>
       </div>
 

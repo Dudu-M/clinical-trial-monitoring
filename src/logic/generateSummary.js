@@ -124,7 +124,7 @@ export function generateActionableInsights(scored) {
       text: `CRA monitoring visit is overdue — ${scored.daysWithoutVisit} days since the last visit (threshold: 45 days).`,
       suggestion: 'Schedule a site visit and send a check-in email to the site coordinator.',
       linkTab: 'email',
-      linkLabel: 'Open email draft →',
+      linkLabel: 'Schedule monitoring visit',
     });
   } else if (scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30) {
     insights.push({
@@ -132,7 +132,7 @@ export function generateActionableInsights(scored) {
       text: `${scored.daysWithoutVisit} days since the last monitoring visit — approaching the overdue threshold.`,
       suggestion: 'Consider scheduling a visit proactively.',
       linkTab: 'email',
-      linkLabel: 'Prepare email →',
+      linkLabel: 'Prepare coordinator email',
     });
   }
 
@@ -142,7 +142,7 @@ export function generateActionableInsights(scored) {
       severity: 'insight',
       text: `SDV is below target (${Math.round((scored.latestSdvPct || 0) * 100)}%) and the site hasn't been visited in ${scored.daysWithoutVisit} days — a monitoring visit could address the SDV backlog and query resolution simultaneously.`,
       linkTab: 'email',
-      linkLabel: 'Draft visit email →',
+      linkLabel: 'Email re: monitoring backlog',
     });
   }
 
@@ -154,7 +154,7 @@ export function generateActionableInsights(scored) {
       text: `Enrolment is ${pctS}% of cumulative target — ${gap} patient${gap !== 1 ? 's' : ''} behind schedule.`,
       suggestion: 'Discuss with the site team. Common causes: eligibility criteria misapplication, patient flow bottlenecks, PI capacity.',
       linkTab: 'email',
-      linkLabel: 'Contact site →',
+      linkLabel: 'Contact site coordinator',
     });
   }
 
@@ -171,7 +171,7 @@ export function generateActionableInsights(scored) {
       text: `${scored.latestQueriesAged} queries have been open for >14 days.`,
       suggestion: 'Contact the coordinator to clear the query backlog before the next data cut.',
       linkTab: 'email',
-      linkLabel: 'Draft follow-up →',
+      linkLabel: 'Follow up on query backlog',
     });
   }
 
