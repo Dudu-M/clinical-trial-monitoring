@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppProvider } from './store/AppContext';
 import { useAppStore } from './store/AppContext';
 import AppShell from './components/layout/AppShell';
@@ -10,16 +10,23 @@ import DataUploadPage from './pages/DataUploadPage';
 import SiteDetailPage from './pages/SiteDetailPage';
 import ReportsPage from './pages/ReportsPage';
 
-// After bootstrap, if there's exactly one trial and we're on '/', go straight to its dashboard
+// On first bootstrap only: if there's exactly one trial and the user landed on '/',
+// skip the landing page and go straight to the dashboard.
+// Uses a ref so that explicit navigation back to '/' is never intercepted.
 function AutoRedirect() {
   const { state, bootstrapped } = useAppStore();
   const navigate = useNavigate();
+  const didRedirect = useRef(false);
 
   useEffect(() => {
-    if (!bootstrapped) return;
+    if (!bootstrapped || didRedirect.current) return;
     const trials = Object.values(state.trials);
     if (trials.length === 1 && window.location.pathname === '/') {
+      didRedirect.current = true;
       navigate(`/trial/${trials[0].id}`, { replace: true });
+    } else if (bootstrapped) {
+      // bootstrapped without redirecting — mark as done so we never redirect later
+      didRedirect.current = true;
     }
   }, [bootstrapped, state.trials, navigate]);
 
