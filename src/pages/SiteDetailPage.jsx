@@ -69,7 +69,7 @@ function MetricCard({ label, value, sub, level, sub2, trend }) {
                : level === 'watch'   ? 'var(--amber-border)'
                : 'var(--border)';
   return (
-    <div className="metric-card" style={{ borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '12px 14px' }}>
+    <div className="metric-card" style={{ borderColor: border, boxShadow: 'none', height: '100%', width: '100%', boxSizing: 'border-box', padding: '12px 14px' }}>
       <div className="label metric-card-label">{label}</div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
         <div className="metric-card-value" style={{ color: valueColor }}>{value}</div>
@@ -187,7 +187,7 @@ function StatGroups({ scored }) {
     <div style={{ marginBottom: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: `repeat(${metrics.length}, 1fr)`, gap: 8, alignItems: 'stretch' }}>
         {metrics.map(m => (
-          <div key={m.key} style={{ display: 'flex' }}>
+          <div key={m.key} style={{ minWidth: 0 }}>
             {m.card}
           </div>
         ))}
@@ -220,7 +220,17 @@ function InsightCard({ insight, onTabSwitch }) {
         minHeight: 16,
       }} />
       <div style={{ flex: 1 }}>
-        <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-primary)' }}>{insight.text}</div>
+        {(() => {
+          const dotIdx = insight.text.indexOf('. ');
+          const first = dotIdx > -1 ? insight.text.slice(0, dotIdx + 1) : insight.text;
+          const rest  = dotIdx > -1 ? insight.text.slice(dotIdx + 2) : '';
+          return (
+            <div style={{ lineHeight: 1.6, color: 'var(--text-primary)' }}>
+              <span style={{ fontSize: 15, fontWeight: 600 }}>{first}</span>
+              {rest && <span style={{ fontSize: 13, fontWeight: 400 }}>{' '}{rest}</span>}
+            </div>
+          );
+        })()}
         {insight.suggestion && (
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>{insight.suggestion}</div>
         )}
@@ -271,9 +281,9 @@ function WhyCard({ scored, summary, insights, stringNotes, onTabSwitch }) {
       {hasInsights && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 32, alignItems: 'start' }}>
 
-          {/* Left — Operational Signals */}
+          {/* Left — Why this site is flagged */}
           <div>
-            <div className="section-title" style={{ marginBottom: 12 }}>Operational Signals</div>
+            <div className="section-title" style={{ marginBottom: 12 }}>Why this site is flagged</div>
             <div>
               {insights.map((ins, i) => (
                 <InsightCard key={i} insight={ins} onTabSwitch={onTabSwitch} />
@@ -285,20 +295,20 @@ function WhyCard({ scored, summary, insights, stringNotes, onTabSwitch }) {
           {actions.length > 0 && (
             <div style={{ minWidth: 200 }}>
               <div className="section-title" style={{ marginBottom: 12 }}>Actions</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {actions.map((ins, i) => (
                   <button
                     key={i}
                     onClick={() => onTabSwitch(ins.linkTab)}
                     style={{
                       textAlign: 'left',
-                      background: 'none',
+                      background: 'var(--navy)',
+                      color: '#fff',
                       border: 'none',
-                      borderBottom: '1px solid var(--border)',
-                      padding: '9px 0',
+                      borderRadius: 'var(--radius)',
+                      padding: '8px 14px',
                       fontSize: 13,
-                      fontWeight: 500,
-                      color: 'var(--navy-mid)',
+                      fontWeight: 600,
                       cursor: 'pointer',
                       width: '100%',
                     }}

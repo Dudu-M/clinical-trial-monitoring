@@ -218,17 +218,10 @@ export default function DashboardPage() {
         <div className="page-header-left">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <h1 className="page-title">{trial.name}</h1>
-            {hasSites && (
-              <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-                {redSites > 0   && <span className="rag-pill red">{redSites} Red</span>}
-                {amberSites > 0 && <span className="rag-pill amber">{amberSites} Amber</span>}
-                {greenSites > 0 && <span className="rag-pill green">{greenSites} Green</span>}
-                {isOnTrack !== null && (
-                  <span className={`trial-stat-track ${isOnTrack ? 'on-track' : 'off-track'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
-                    {isOnTrack ? '↑ On track' : '↓ Off track'}
-                  </span>
-                )}
-              </div>
+            {hasSites && isOnTrack !== null && (
+              <span className={`trial-stat-track ${isOnTrack ? 'on-track' : 'off-track'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
+                {isOnTrack ? '↑ On track' : '↓ Off track'}
+              </span>
             )}
           </div>
           <p className="text-secondary" style={{ marginTop: 4, fontSize: 13 }}>
@@ -259,6 +252,18 @@ export default function DashboardPage() {
       {/* Trial stat bar */}
       {hasSites && (
         <div className="trial-stat-bar">
+          <div className="trial-stat">
+            <div className="trial-stat-label">Sites</div>
+            <div className="trial-stat-value">{rankedSites.length}</div>
+            <div className="trial-stat-sub" style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+              {redSites > 0   && <span style={{ color: 'var(--red)',   fontWeight: 600 }}>{redSites} red</span>}
+              {amberSites > 0 && <span style={{ color: 'var(--amber)', fontWeight: 600 }}>{redSites > 0 ? ' · ' : ''}{amberSites} amber</span>}
+              {greenSites > 0 && <span style={{ color: 'var(--green)', fontWeight: 600 }}>{(redSites > 0 || amberSites > 0) ? ' · ' : ''}{greenSites} green</span>}
+            </div>
+          </div>
+
+          <div className="trial-stat-divider" />
+
           <div className="trial-stat">
             <div className="trial-stat-label">Enrolled</div>
             <div className="trial-stat-value">
@@ -302,7 +307,7 @@ export default function DashboardPage() {
           {requiredRunRate && (
             <>
               <div className="trial-stat-divider" />
-              <div className="trial-stat">
+              <div className={`trial-stat ${isOnTrack ? 'good' : 'bad'}`}>
                 <div className="trial-stat-label">Required Rate</div>
                 <div className="trial-stat-value">{requiredRunRate}<span className="trial-stat-unit">/mo</span></div>
                 <div className="trial-stat-sub">to hit target</div>
