@@ -60,6 +60,7 @@ function ScoreBreakdown({ scores }) {
 }
 
 function MonthTable({ months }) {
+  const hasVisitDates = months.some(m => m.monitoringVisitDate);
   return (
     <div style={{ overflowX: 'auto' }}>
       <table className="data-table">
@@ -72,6 +73,7 @@ function MonthTable({ months }) {
             <th className="num">Queries &gt;14d</th>
             <th className="num">SDV %</th>
             <th className="num">Deviations</th>
+            {hasVisitDates && <th>Monitoring Visit</th>}
           </tr>
         </thead>
         <tbody>
@@ -86,6 +88,13 @@ function MonthTable({ months }) {
                 {m.sdvPct != null ? pct(m.sdvPct) : '—'}
               </td>
               <td className={`num${(m.deviations || 0) >= 3 ? ' flag' : ''}`}>{m.deviations ?? '—'}</td>
+              {hasVisitDates && (
+                <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+                  {m.monitoringVisitDate
+                    ? new Date(m.monitoringVisitDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+                    : '—'}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -378,6 +387,32 @@ export default function SiteDetailPage() {
                 <div className="metric-card-sub">&gt;14 days</div>
               </div>
             )}
+            {scored.deviationsTrend && scored.deviationsTrend.some(d => d > 0) && (
+              <div className={`metric-card ${scored.scores?.deviations >= 2 ? 'bad' : scored.scores?.deviations >= 1 ? 'warn' : ''}`}>
+                <div className="label metric-card-label">Deviations</div>
+                <div className="metric-card-value">{scored.deviationsTrend[scored.deviationsTrend.length - 1]}</div>
+                <div className="metric-card-sub">{scored.deviationsTrend.join(' → ')} trend</div>
+              </div>
+            )}
+            <div className={`metric-card ${scored.craOverdue ? 'bad' : ''}`}>
+              <div className="label metric-card-label">Last CRA Visit</div>
+              {scored.lastMonitoringVisit ? (
+                <>
+                  <div className="metric-card-value" style={{ fontSize: 16 }}>
+                    {new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
+                  </div>
+                  <div className="metric-card-sub">
+                    {scored.daysWithoutVisit != null ? `${scored.daysWithoutVisit}d ago` : ''}
+                    {scored.craOverdue ? ' · overdue' : ''}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="metric-card-value" style={{ fontSize: 22 }}>—</div>
+                  <div className="metric-card-sub">no visit recorded</div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
