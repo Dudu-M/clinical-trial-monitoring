@@ -99,7 +99,9 @@ function SiteCard({ site, rank, trialMeta }) {
             )
           )}
           {site.craOverdue && !site.modifierFlags?.some(f => f.includes('CRA')) && (
-            <span className="flag-chip amber">CRA visit overdue</span>
+            <span className="flag-chip amber">
+              CRA visit overdue{site.daysWithoutVisit != null ? ` · ${site.daysWithoutVisit} days` : ''}
+            </span>
           )}
         </div>
       )}

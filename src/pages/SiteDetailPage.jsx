@@ -31,18 +31,42 @@ function scoreLevel(score) {
 }
 
 
-function MetricCard({ label, value, sub, level, sub2 }) {
-  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : '';
-  const bg = level === 'flagged' ? '#FEF6F6'
-           : level === 'watch'   ? '#FFFCF0'
-           : 'var(--surface)';
+// Returns 'up' (improving), 'down' (worsening), or 'stable' based on last 3 non-null values.
+// higherIsBetter: true for SDV (high % = good), false for queries/deviations/SF rate (low = good)
+function metricTrend(values, higherIsBetter) {
+  const clean = (values || []).filter(v => v != null && !isNaN(v));
+  const recent = clean.slice(-3);
+  if (recent.length < 2) return 'stable';
+  const first = recent[0];
+  const last  = recent[recent.length - 1];
+  if (first === last) return 'stable';
+  const improving = higherIsBetter ? last > first : last < first;
+  return improving ? 'up' : 'down';
+}
+
+function TrendArrow({ trend }) {
+  if (!trend || trend === 'stable') return null;
+  return (
+    <span style={{ fontSize: 12, fontWeight: 700, lineHeight: 1, color: trend === 'up' ? 'var(--green)' : 'var(--red)' }}>
+      {trend === 'up' ? '↑' : '↓'}
+    </span>
+  );
+}
+
+function MetricCard({ label, value, sub, level, sub2, trend }) {
+  const valueColor = level === 'flagged' ? 'var(--red)'
+                   : level === 'watch'   ? 'var(--amber)'
+                   : 'var(--text-primary)';
   const border = level === 'flagged' ? 'var(--red-border)'
                : level === 'watch'   ? 'var(--amber-border)'
                : 'var(--border)';
   return (
-    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '14px 14px' }}>
+    <div className="metric-card" style={{ borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box', padding: '14px 14px' }}>
       <div className="label metric-card-label">{label}</div>
-      <div className={`metric-card-value ${colorCls}`}>{value}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+        <div className="metric-card-value" style={{ color: valueColor }}>{value}</div>
+        <TrendArrow trend={trend} />
+      </div>
       {sub && <div className="metric-card-sub">{sub}</div>}
       {sub2 && (
         <div className="metric-card-sub" style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--border)' }}>
@@ -54,7 +78,20 @@ function MetricCard({ label, value, sub, level, sub2 }) {
 }
 
 function StatGroups({ scored }) {
-  const s = scored.scores || {};
+  const s      = scored.scores || {};
+  const months = scored.months || [];
+
+  // Cumulative screen failure numbers for sub-text
+  const totalFailed  = months.reduce((n, m) => n + (m.screenFailures ?? 0), 0);
+  const totalEnrolled = months.reduce((n, m) => n + (m.enrolled ?? 0), 0);
+  const sfTotal = totalFailed + totalEnrolled;
+  const sfSub = sfTotal > 0 ? `${totalFailed} failed / ${sfTotal} screened · cumulative` : 'of screened';
+
+  // Trends (last 3 months) — not shown for enrolment or CRA
+  const sfTrend    = metricTrend(months.map(m => { const d = (m.enrolled ?? 0) + (m.screenFailures ?? 0); return d > 0 ? (m.screenFailures ?? 0) / d : null; }), false);
+  const sdvTrend   = metricTrend(months.map(m => m.sdvPct), true);
+  const queryTrend = metricTrend(months.map(m => m.queriesAged), false);
+  const devTrend2  = metricTrend(months.map(m => m.deviations ?? 0), false);
 
   const craLevel = scored.craOverdue ? 'flagged'
     : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
@@ -79,8 +116,9 @@ function StatGroups({ scored }) {
         <MetricCard
           label="Screen Failure"
           value={pct(scored.screenFailureRate)}
-          sub="of screened"
+          sub={sfSub}
           level={scoreLevel(s.screenFailure ?? 0)}
+          trend={sfTrend}
         />
       ),
     },
@@ -92,6 +130,7 @@ function StatGroups({ scored }) {
           value={scored.latestSdvPct != null ? pct(scored.latestSdvPct) : '—'}
           sub="latest month"
           level={scoreLevel(s.sdv ?? 0)}
+          trend={sdvTrend}
         />
       ),
     },
@@ -103,6 +142,7 @@ function StatGroups({ scored }) {
           value={scored.latestQueriesAged ?? 0}
           sub=">14 days open"
           level={scoreLevel(s.queryBurden ?? 0)}
+          trend={queryTrend}
         />
       ),
     },
@@ -114,6 +154,7 @@ function StatGroups({ scored }) {
           value={(scored.deviationsTrend || []).at(-1) ?? 0}
           sub={scored.deviationsTrend?.length > 1 ? (scored.deviationsTrend || []).join(' → ') : 'latest month'}
           level={scoreLevel(s.deviations ?? 0)}
+          trend={devTrend2}
         />
       ),
     },
@@ -145,24 +186,6 @@ function StatGroups({ scored }) {
           </div>
         ))}
       </div>
-      {/* Overdue tag — shown below the row so it's always visible regardless of card layout */}
-      {(scored.craOverdue || scored.modifierFlags?.length > 0) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-          {scored.craOverdue && (
-            <span className="flag-chip amber">
-              CRA visit overdue{scored.daysWithoutVisit != null ? ` · ${scored.daysWithoutVisit} days` : ''}
-            </span>
-          )}
-          {!scored.lastMonitoringVisit && (
-            <span className="flag-chip amber">No monitoring visit on record</span>
-          )}
-          {scored.modifierFlags?.map((f, i) =>
-            f.includes('Persistent') ? null : (
-              <span key={i} className={`flag-chip ${f.includes('⚠') ? 'red' : 'info'}`}>{f}</span>
-            )
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -598,7 +621,9 @@ export default function SiteDetailPage() {
               )
             )}
             {scored.craOverdue && (
-              <span className="flag-chip amber">CRA visit overdue</span>
+              <span className="flag-chip amber">
+                CRA visit overdue{scored.daysWithoutVisit != null ? ` · ${scored.daysWithoutVisit} days` : ''}
+              </span>
             )}
           </div>
         </div>
