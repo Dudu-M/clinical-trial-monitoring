@@ -30,24 +30,17 @@ function scoreLevel(score) {
   return 'ok';
 }
 
-// ── Grouped stat sections ─────────────────────────────────────────
-function StatGroup({ level, children }) {
-  const labels = { flagged: 'Flagged', watch: 'Watch', ok: 'OK' };
-  const clsMap  = { flagged: 'stat-group-red', watch: 'stat-group-amber', ok: 'stat-group-green' };
-  const items = Array.isArray(children) ? children.filter(Boolean) : [children].filter(Boolean);
-  if (items.length === 0) return null;
-  return (
-    <div className={`stat-group ${clsMap[level]}`}>
-      <div className="stat-group-label">{labels[level]}</div>
-      <div className="stat-group-cards">{items}</div>
-    </div>
-  );
-}
 
 function MetricCard({ label, value, sub, level, sub2 }) {
   const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : '';
+  const bg = level === 'flagged' ? '#FEF6F6'
+           : level === 'watch'   ? '#FFFCF0'
+           : 'var(--surface)';
+  const border = level === 'flagged' ? 'var(--red-border)'
+               : level === 'watch'   ? 'var(--amber-border)'
+               : 'var(--border)';
   return (
-    <div className="metric-card">
+    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none' }}>
       <div className="label metric-card-label">{label}</div>
       <div className={`metric-card-value ${colorCls}`}>{value}</div>
       {sub && <div className="metric-card-sub">{sub}</div>}
@@ -70,7 +63,6 @@ function StatGroups({ scored }) {
   const metrics = [
     {
       key: 'enrol',
-      level: scoreLevel(s.enrolment ?? 0),
       card: (
         <MetricCard
           label="Enrolment"
@@ -83,7 +75,6 @@ function StatGroups({ scored }) {
     },
     scored.screenFailureRate > 0 && {
       key: 'sf',
-      level: scoreLevel(s.screenFailure ?? 0),
       card: (
         <MetricCard
           label="Screen Failure"
@@ -95,7 +86,6 @@ function StatGroups({ scored }) {
     },
     {
       key: 'sdv',
-      level: scoreLevel(s.sdv ?? 0),
       card: (
         <MetricCard
           label="SDV"
@@ -107,7 +97,6 @@ function StatGroups({ scored }) {
     },
     {
       key: 'queries',
-      level: scoreLevel(s.queryBurden ?? 0),
       card: (
         <MetricCard
           label="Aged Queries"
@@ -119,7 +108,6 @@ function StatGroups({ scored }) {
     },
     {
       key: 'dev',
-      level: scoreLevel(s.deviations ?? 0),
       card: (
         <MetricCard
           label="Deviations"
@@ -131,7 +119,6 @@ function StatGroups({ scored }) {
     },
     {
       key: 'cra',
-      level: craLevel,
       card: (
         <MetricCard
           label="Last CRA Visit"
@@ -147,17 +134,13 @@ function StatGroups({ scored }) {
     },
   ].filter(Boolean);
 
-  const groups = {
-    flagged: metrics.filter(m => m.level === 'flagged'),
-    watch:   metrics.filter(m => m.level === 'watch'),
-    ok:      metrics.filter(m => m.level === 'ok'),
-  };
-
   return (
-    <div style={{ marginBottom: 16 }}>
-      <StatGroup level="flagged">{groups.flagged.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
-      <StatGroup level="watch">{groups.watch.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
-      <StatGroup level="ok">{groups.ok.map(m => <div key={m.key}>{m.card}</div>)}</StatGroup>
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+      {metrics.map(m => (
+        <div key={m.key} style={{ flex: '1 1 140px', minWidth: 130 }}>
+          {m.card}
+        </div>
+      ))}
     </div>
   );
 }
@@ -279,7 +262,7 @@ function WhyCard({ scored, summary, insights, stringNotes, onTabSwitch }) {
 }
 
 // ── Score breakdown ───────────────────────────────────────────────
-function ScoreBreakdown({ scores }) {
+function ScoreBreakdown({ scores, scored }) {
   const dims = [
     { key: 'enrolment',     label: 'Enrolment' },
     { key: 'screenFailure', label: 'Screen Failure' },
@@ -287,6 +270,15 @@ function ScoreBreakdown({ scores }) {
     { key: 'sdv',           label: 'SDV Completeness' },
     { key: 'deviations',    label: 'Protocol Deviations' },
   ];
+  const baseSum = dims.reduce((n, { key }) => n + (scores[key] ?? 0), 0);
+  const adjustedTotal = scores.total ?? baseSum;
+  const delta = adjustedTotal - baseSum;
+
+  const modifiers = [];
+  if (scored?.persistentConcern) modifiers.push({ label: `Persistent concern (${scored.persistentConcern} months)`, delta: +2 });
+  if (scored?.isNewlyActivated)  modifiers.push({ label: 'Recently activated — limited data', delta: -2 });
+  if (scored?.onLeave)           modifiers.push({ label: 'Coordinator absence noted', delta: -1 });
+
   return (
     <div className="score-panel">
       {dims.map(({ key, label }) => {
@@ -304,10 +296,35 @@ function ScoreBreakdown({ scores }) {
           </div>
         );
       })}
+
+      {/* Modifiers */}
+      {modifiers.map((mod, i) => (
+        <div key={i} className="score-row" style={{ background: 'var(--bg)', opacity: 0.85 }}>
+          <div className="score-row-header">
+            <span className="score-row-name" style={{ fontStyle: 'italic' }}>{mod.label}</span>
+            <span className="score-row-val" style={{ color: mod.delta > 0 ? 'var(--red)' : 'var(--green)' }}>
+              {mod.delta > 0 ? `+${mod.delta}` : mod.delta}
+            </span>
+          </div>
+        </div>
+      ))}
+
+      {/* Base sum (only shown when modifiers are present) */}
+      {delta !== 0 && (
+        <div className="score-row">
+          <div className="score-row-header">
+            <span className="score-row-name" style={{ color: 'var(--text-secondary)' }}>Base score (5 dimensions)</span>
+            <span className="score-row-val" style={{ color: 'var(--text-secondary)' }}>{baseSum}/15</span>
+          </div>
+        </div>
+      )}
+
       <div className="score-row" style={{ background: 'var(--navy-pale)', border: '1px solid #C5D3E8' }}>
         <div className="score-row-header">
-          <span className="score-row-name" style={{ color: 'var(--navy)' }}>Total Risk Score</span>
-          <span className="score-row-val" style={{ color: 'var(--navy)' }}>{scores.total}/15</span>
+          <span className="score-row-name" style={{ color: 'var(--navy)' }}>
+            {delta !== 0 ? 'Adjusted Risk Score' : 'Total Risk Score'}
+          </span>
+          <span className="score-row-val" style={{ color: 'var(--navy)' }}>{adjustedTotal}/15</span>
         </div>
       </div>
     </div>
@@ -608,7 +625,7 @@ export default function SiteDetailPage() {
                 (0 = no concern · 3 = critical · total out of 15)
               </span>
             </div>
-            {scored.scores && <ScoreBreakdown scores={scored.scores} />}
+            {scored.scores && <ScoreBreakdown scores={scored.scores} scored={scored} />}
           </div>
         </div>
       )}
