@@ -211,6 +211,21 @@ export function scoreSites(sites, trialMeta, savedThresholds) {
       modifierFlags.push(`⚠ Persistent concern — ${persistent} months`);
     }
 
+    // Enrolment bonus: mitigates score when enrolment is strong but other metrics have issues
+    const enrolRatio = cumTarget > 0 ? cumEnrolled / cumTarget : 0;
+    const otherScore = baseTotal - scores.enrolment;
+    let enrolmentBonus = 0;
+    if (otherScore >= t.rag.amber) {
+      if (enrolRatio >= 1.0) {
+        enrolmentBonus = -2;
+      } else if (enrolRatio >= 0.9) {
+        enrolmentBonus = -1;
+      }
+    }
+    if (enrolmentBonus < 0) {
+      adjustedTotal = Math.max(0, adjustedTotal + enrolmentBonus);
+    }
+
     scores.total = adjustedTotal;
     const rag = scores.total >= t.rag.red ? 'red' : scores.total >= t.rag.amber ? 'amber' : 'green';
 
@@ -237,6 +252,7 @@ export function scoreSites(sites, trialMeta, savedThresholds) {
       modifierNotes,
       isNewlyActivated,
       onLeave,
+      enrolmentBonus,
       persistentConcernMonthLabels,
     };
   });

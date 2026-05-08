@@ -368,6 +368,10 @@ function ScoreBreakdown({ scores, scored }) {
   if (scored?.persistentConcern) modifiers.push({ label: `Persistent concern (${scored.persistentConcern} months)`, delta: +2 });
   if (scored?.isNewlyActivated)  modifiers.push({ label: 'Recently activated — limited data', delta: -2 });
   if (scored?.onLeave)           modifiers.push({ label: 'Coordinator absence noted', delta: -1 });
+  if (scored?.enrolmentBonus && scored.enrolmentBonus < 0) {
+    const label = scored.enrolmentBonus === -2 ? 'Enrolment at or above target' : 'Enrolment close to target';
+    modifiers.push({ label, delta: scored.enrolmentBonus });
+  }
 
   return (
     <div className="score-panel">
@@ -716,11 +720,16 @@ export default function SiteDetailPage() {
 
           {/* Score breakdown */}
           <div className="card card-pad">
-            <div className="section-title" style={{ marginBottom: 12 }}>
-              Score Breakdown
-              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
-                (0 = no concern · 3 = critical · total out of 15)
-              </span>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div>
+                <span className="section-title">Score Breakdown</span>
+                <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                  (0 = no concern · 3 = critical · total out of 15)
+                </span>
+              </div>
+              <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/trial/${id}/setup`)}>
+                Manage thresholds →
+              </button>
             </div>
             {scored.scores && <ScoreBreakdown scores={scored.scores} scored={scored} />}
           </div>

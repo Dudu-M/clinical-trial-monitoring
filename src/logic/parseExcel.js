@@ -143,8 +143,9 @@ export function parseExcel(arrayBuffer) {
       if (!row || row[siteCol] == null) continue;
       const id = normaliseSiteId(row[siteCol]);
       if (!id) continue;
+      const hospitalCol = colIdxAny(hdr, ['hospital'], ['site name']);
       contactMap[id] = {
-        hospital: colIdxAny(hdr, ['hospital']) >= 0 ? (row[colIdxAny(hdr, ['hospital'])] || '') : '',
+        hospital: hospitalCol >= 0 ? String(row[hospitalCol] || '') : '',
         pi: {
           name:  piNameCol  >= 0 ? (row[piNameCol]  || '') : '',
           email: piEmailCol >= 0 ? (row[piEmailCol] || '') : '',
@@ -155,7 +156,9 @@ export function parseExcel(arrayBuffer) {
         },
         dateActivated:        activatedCol >= 0 ? parseExcelDate(row[activatedCol]) : null,
         lastMonitoringVisit:  visitCol     >= 0 ? parseExcelDate(row[visitCol])     : null,
-        notes: notesCol >= 0 && row[notesCol] ? [String(row[notesCol])] : [],
+        notes: notesCol >= 0 && row[notesCol] && String(row[notesCol]).trim()
+          ? [{ id: `import-${id}`, text: String(row[notesCol]).trim(), date: null, author: 'Imported from data' }]
+          : [],
       };
     }
   }
@@ -371,15 +374,16 @@ export function parseExcel(arrayBuffer) {
 
     const months = Object.values(monthMap).sort((a, b) => a.date - b.date);
 
-    // Raw string notes from contact + enrolment sheets
-    const siteNotes = [
-      ...(contact.notes || []),
-      ...activeEnrolMonths.flatMap(m => m.notes || []),
-    ].filter(n => n && typeof n === 'string' && n.trim());
+    // String notes from enrolment sheet (shown in WhyCard operational section)
+    const siteNotes = activeEnrolMonths.flatMap(m => m.notes || [])
+      .filter(n => n && typeof n === 'string' && n.trim());
 
-    // noteHistory preserves month association for dashboard display
+    // Object notes from contacts sheet (shown in Team Notes tab)
+    const contactObjectNotes = (contact.notes || []).filter(n => n && typeof n === 'object');
+
+    // noteHistory for dashboard card display (string preview of recent notes)
     const noteHistory = [
-      ...(contact.notes || []).map(text => ({ text: String(text), month: null })),
+      ...(contact.notes || []).map(n => ({ text: typeof n === 'object' ? n.text : String(n), month: null })),
       ...activeEnrolMonths.flatMap(m => (m.notes || []).map(text => ({ text: String(text), month: m.month }))),
     ].filter(n => n.text && n.text.trim());
 
@@ -392,7 +396,7 @@ export function parseExcel(arrayBuffer) {
       dateActivated,
       lastMonitoringVisit: lastVisit,
       months,
-      notes: siteNotes,
+      notes: [...siteNotes, ...contactObjectNotes],
       noteHistory,
       dataQualityFlags: [],
     };
