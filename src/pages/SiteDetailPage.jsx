@@ -40,7 +40,7 @@ function MetricCard({ label, value, sub, level, sub2 }) {
                : level === 'watch'   ? 'var(--amber-border)'
                : 'var(--border)';
   return (
-    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none' }}>
+    <div className="metric-card" style={{ background: bg, borderColor: border, boxShadow: 'none', height: '100%', boxSizing: 'border-box' }}>
       <div className="label metric-card-label">{label}</div>
       <div className={`metric-card-value ${colorCls}`}>{value}</div>
       {sub && <div className="metric-card-sub">{sub}</div>}
@@ -124,21 +124,14 @@ function StatGroups({ scored }) {
           ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
           : null;
         const daysStr = scored.daysWithoutVisit != null ? `${scored.daysWithoutVisit} days ago` : null;
-        if (scored.craOverdue) {
-          return (
-            <MetricCard
-              label="CRA Monitoring Visit"
-              value="Overdue"
-              sub={dateStr ? `Last: ${dateStr}${daysStr ? ` · ${daysStr}` : ''}` : 'No visit on record'}
-              level="flagged"
-            />
-          );
-        }
+        const sub = scored.craOverdue
+          ? `${daysStr || 'unknown'}  ·  Overdue`
+          : daysStr || 'no visit recorded';
         return (
           <MetricCard
             label="CRA Monitoring Visit"
             value={dateStr || '—'}
-            sub={daysStr || 'no visit recorded'}
+            sub={sub}
             level={craLevel}
           />
         );
@@ -147,9 +140,9 @@ function StatGroups({ scored }) {
   ].filter(Boolean);
 
   return (
-    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'stretch', marginBottom: 16 }}>
       {metrics.map(m => (
-        <div key={m.key} style={{ flex: '1 1 140px', minWidth: 130 }}>
+        <div key={m.key} style={{ flex: '1 1 140px', minWidth: 130, display: 'flex' }}>
           {m.card}
         </div>
       ))}
@@ -518,7 +511,6 @@ export default function SiteDetailPage() {
   const { state } = useAppStore();
   const trial = state.trials[id];
   const [activeTab, setActiveTab] = useState('overview');
-  const [emailSubTab, setEmailSubTab] = useState('coordinator');
 
   if (!trial || !trial.sites?.[siteId]) {
     return (
@@ -551,9 +543,9 @@ export default function SiteDetailPage() {
   const tabs = [
     { key: 'overview', label: 'Overview & Analysis' },
     { key: 'months',   label: 'Monthly Data' },
-    { key: 'team',     label: `Team Notes (${allNotes.filter(n => n && typeof n === 'object').length})` },
     { key: 'email',    label: 'Email & Updates' },
     { key: 'log',      label: `Email Log (${(rawSite.emailLog || []).length})` },
+    { key: 'team',     label: `Team Notes (${allNotes.filter(n => n && typeof n === 'object').length})` },
   ];
 
   return (
@@ -626,7 +618,7 @@ export default function SiteDetailPage() {
             summary={summary}
             insights={insights}
             stringNotes={stringNotes}
-            onTabSwitch={tab => { setActiveTab(tab); if (tab === 'email') setEmailSubTab('coordinator'); }}
+            onTabSwitch={tab => setActiveTab(tab)}
           />
 
           {/* Score breakdown */}
@@ -656,35 +648,17 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Email & Updates — sub-tabs */}
+      {/* Email & Updates — side by side */}
       {activeTab === 'email' && (
-        <div>
-          {/* Sub-tab bar */}
-          <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--border)' }}>
-            {[
-              { key: 'coordinator', label: 'Email Coordinator' },
-              { key: 'sponsor',     label: 'Sponsor Update' },
-            ].map(st => (
-              <button
-                key={st.key}
-                className={`tab-btn${emailSubTab === st.key ? ' active' : ''}`}
-                onClick={() => setEmailSubTab(st.key)}
-              >
-                {st.label}
-              </button>
-            ))}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+          <div className="card card-pad">
+            <div className="section-title" style={{ marginBottom: 14 }}>Email Coordinator</div>
+            <EmailCoordinatorTab site={scored} trialMeta={trialMeta} trialId={id} siteId={siteId} />
           </div>
-
-          {emailSubTab === 'coordinator' && (
-            <div className="card card-pad">
-              <EmailCoordinatorTab site={scored} trialMeta={trialMeta} trialId={id} siteId={siteId} />
-            </div>
-          )}
-          {emailSubTab === 'sponsor' && (
-            <div className="card card-pad">
-              <SponsorUpdateTab site={scored} trialMeta={trialMeta} />
-            </div>
-          )}
+          <div className="card card-pad">
+            <div className="section-title" style={{ marginBottom: 14 }}>Sponsor Update</div>
+            <SponsorUpdateTab site={scored} trialMeta={trialMeta} />
+          </div>
         </div>
       )}
 
