@@ -1,8 +1,17 @@
 import { useState } from 'react';
 
-export default function DataQualityBanner({ notices }) {
-  const [dismissed, setDismissed] = useState(false);
+export default function DataQualityBanner({ notices, trialId }) {
+  const storageKey = trialId ? `dq-dismissed-${trialId}` : null;
+  const [dismissed, setDismissed] = useState(
+    () => storageKey ? localStorage.getItem(storageKey) === 'true' : false
+  );
+
   if (dismissed || !notices || notices.length === 0) return null;
+
+  function handleDismiss() {
+    if (storageKey) localStorage.setItem(storageKey, 'true');
+    setDismissed(true);
+  }
 
   return (
     <div className="dq-banner">
@@ -18,7 +27,7 @@ export default function DataQualityBanner({ notices }) {
           {notices.map((n, i) => <li key={i}>· {n}</li>)}
         </ul>
       </div>
-      <button className="dq-banner-close" onClick={() => setDismissed(true)}>
+      <button className="dq-banner-close" onClick={handleDismiss} title="Dismiss">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
         </svg>

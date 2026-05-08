@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useState } from 'react';
+import { createContext, useContext, useReducer, useEffect, useCallback, useState, useRef } from 'react';
 import { loadFromStorage, saveToStorage, generateId } from '../utils/storage';
 import { parseExcel } from '../logic/parseExcel';
 import { scoreSites } from '../logic/scoreSites';
@@ -140,14 +140,17 @@ async function autoLoadExcel(dispatch) {
 export function AppProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const autoLoadRef = useRef(false);
 
-  // Load from localStorage, then auto-load Excel if empty
+  // Load from localStorage, then auto-load Excel if empty.
+  // The ref guard prevents React Strict Mode double-invocation from creating duplicate trials.
   useEffect(() => {
     const saved = loadFromStorage();
     if (saved && Object.keys(saved.trials || {}).length > 0) {
       dispatch({ type: 'LOAD_STATE', payload: saved });
       setBootstrapped(true);
-    } else {
+    } else if (!autoLoadRef.current) {
+      autoLoadRef.current = true;
       autoLoadExcel(dispatch).finally(() => setBootstrapped(true));
     }
   }, []);

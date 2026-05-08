@@ -112,7 +112,88 @@ export function generateSummary(site, trialMeta) {
   return parts.join(' ');
 }
 
-// Shorter one-line headline for dashboard cards
+// Actionable insights linked to specific metric issues
+export function generateActionableInsights(scored) {
+  const insights = [];
+  const s = scored.scores || {};
+
+  if (scored.persistentConcern) {
+    const months = scored.persistentConcernMonthLabels || [];
+    insights.push({
+      severity: 'critical',
+      text: `Risk has been persistently elevated for ${scored.persistentConcern} consecutive months${months.length > 0 ? ` (${months.join(', ')})` : ''}. This is not a transient issue — consider escalating to the sponsor or requesting an additional CRA visit.`,
+    });
+  }
+
+  if (scored.craOverdue) {
+    insights.push({
+      severity: 'action',
+      text: `CRA monitoring visit is overdue — ${scored.daysWithoutVisit} days since the last visit (threshold: 45 days).`,
+      suggestion: 'Schedule a site visit and send a check-in email to the site coordinator.',
+      linkTab: 'email',
+      linkLabel: 'Open email draft →',
+    });
+  } else if (scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30) {
+    insights.push({
+      severity: 'watch',
+      text: `${scored.daysWithoutVisit} days since the last monitoring visit — approaching the overdue threshold.`,
+      suggestion: 'Consider scheduling a visit proactively.',
+      linkTab: 'email',
+      linkLabel: 'Prepare email →',
+    });
+  }
+
+  // SDV low + monitoring gap — link the two
+  if (s.sdv >= 2 && scored.daysWithoutVisit != null && scored.daysWithoutVisit > 25) {
+    insights.push({
+      severity: 'insight',
+      text: `SDV is below target (${Math.round((scored.latestSdvPct || 0) * 100)}%) and the site hasn't been visited in ${scored.daysWithoutVisit} days — a monitoring visit could address the SDV backlog and query resolution simultaneously.`,
+      linkTab: 'email',
+      linkLabel: 'Draft visit email →',
+    });
+  }
+
+  if (s.enrolment >= 2) {
+    const gap  = (scored.enrolmentSummary?.cumTarget || 0) - (scored.enrolmentSummary?.cumEnrolled || 0);
+    const pctS = Math.round((scored.enrolmentSummary?.ratio || 0) * 100);
+    insights.push({
+      severity: s.enrolment === 3 ? 'action' : 'watch',
+      text: `Enrolment is ${pctS}% of cumulative target — ${gap} patient${gap !== 1 ? 's' : ''} behind schedule.`,
+      suggestion: 'Discuss with the site team. Common causes: eligibility criteria misapplication, patient flow bottlenecks, PI capacity.',
+      linkTab: 'email',
+      linkLabel: 'Contact site →',
+    });
+  }
+
+  if (s.screenFailure >= 2) {
+    insights.push({
+      severity: 'watch',
+      text: `Screen failure rate of ${Math.round((scored.screenFailureRate || 0) * 100)}% is above threshold — check whether eligibility criteria are being applied correctly.`,
+    });
+  }
+
+  if (s.queryBurden >= 2) {
+    insights.push({
+      severity: 'action',
+      text: `${scored.latestQueriesAged} queries have been open for >14 days.`,
+      suggestion: 'Contact the coordinator to clear the query backlog before the next data cut.',
+      linkTab: 'email',
+      linkLabel: 'Draft follow-up →',
+    });
+  }
+
+  if (s.deviations >= 2) {
+    const trend = (scored.deviationsTrend || []).join(' → ');
+    insights.push({
+      severity: 'watch',
+      text: `Protocol deviation count${trend ? ` (${trend})` : ''} indicates compliance issues — may require targeted protocol training.`,
+    });
+  }
+
+  return insights;
+}
+
+
 export function generateHeadline(site, trialMeta) {
   const { scores, trendSignal, craOverdue, enrolmentSummary, screenFailureRate,
     latestSdvPct, latestQueriesAged, modifierFlags, notes, lastMonitoringVisit, daysWithoutVisit } = site;

@@ -1,20 +1,21 @@
-function scoreEnrolment(site) {
-  const months = site.months;
+import { DEFAULT_THRESHOLDS, mergeThresholds } from './defaultThresholds';
+
+function scoreEnrolment(site, t) {
   let cumTarget = 0;
   let cumEnrolled = 0;
-  for (const m of months) {
+  for (const m of site.months) {
     if (m.target != null) cumTarget += m.target;
     if (m.enrolled != null) cumEnrolled += m.enrolled;
   }
   if (cumTarget === 0) return 0;
   const ratio = cumEnrolled / cumTarget;
-  if (ratio >= 0.9) return 0;
-  if (ratio >= 0.75) return 1;
-  if (ratio >= 0.5) return 2;
+  if (ratio >= t.enrolment.watch)    return 0;
+  if (ratio >= t.enrolment.warn)     return 1;
+  if (ratio >= t.enrolment.critical) return 2;
   return 3;
 }
 
-function scoreScreenFailure(site) {
+function scoreScreenFailure(site, t) {
   let totalEnrolled = 0;
   let totalFailed = 0;
   for (const m of site.months) {
@@ -24,75 +25,78 @@ function scoreScreenFailure(site) {
   const denom = totalEnrolled + totalFailed;
   if (denom === 0) return 0;
   const rate = totalFailed / denom;
-  if (rate < 0.3) return 0;
-  if (rate < 0.5) return 1;
-  if (rate < 0.7) return 2;
-  return 3; // 70%+ always critical
-}
-
-function scoreQueryBurden(months) {
-  if (months.length === 0) return 0;
-  const latest = months[months.length - 1];
-  const q = latest.queriesAged ?? 0;
-  if (q === 0) return 0;
-  if (q <= 3) return 1;
-  if (q <= 8) return 2;
+  if (rate < t.screenFailure.watch)    return 0;
+  if (rate < t.screenFailure.warn)     return 1;
+  if (rate < t.screenFailure.critical) return 2;
   return 3;
 }
 
-function scoreSDV(months) {
+function scoreQueryBurden(months, t) {
+  if (months.length === 0) return 0;
+  const q = months[months.length - 1].queriesAged ?? 0;
+  if (q === 0)                        return 0;
+  if (q <= t.queryBurden.watch)       return 1;
+  if (q <= t.queryBurden.warn)        return 2;
+  return 3;
+}
+
+function scoreSDV(months, t) {
   if (months.length === 0) return 0;
   for (let i = months.length - 1; i >= 0; i--) {
     const sdv = months[i].sdvPct;
     if (sdv != null && !isNaN(sdv)) {
-      if (sdv >= 0.9) return 0;
-      if (sdv >= 0.8) return 1;
-      if (sdv >= 0.65) return 2;
+      if (sdv >= t.sdv.watch)    return 0;
+      if (sdv >= t.sdv.warn)     return 1;
+      if (sdv >= t.sdv.critical) return 2;
       return 3;
     }
   }
   return 0;
 }
 
-function scoreDeviations(months) {
+function scoreDeviations(months, t) {
   if (months.length === 0) return 0;
   const devs = months.map(m => m.deviations ?? 0);
-  const last = devs[devs.length - 1];
-  const max = Math.max(...devs);
+  const last  = devs[devs.length - 1];
+  const max   = Math.max(...devs);
   const isRising = devs.length > 1 && devs.every((v, i) => i === 0 || v >= devs[i - 1]);
-  if (max === 0) return 0;
-  if (isRising && last >= 3) return 3;
-  if (max >= 3 || isRising) return 2;
-  return 1;
+
+  if (max < t.deviations.watch) return 0;
+  if (isRising && last >= t.deviations.critical) return 3;
+  if (max >= t.deviations.critical || (isRising && max >= t.deviations.warn)) return 2;
+  if (max >= t.deviations.warn) return 2;
+  return 1; // max >= watch
 }
 
+// Internal snapshot scorer — uses defaults, only for trend/persistent tracking
 function scoreMonthSnapshot(month) {
+  const t = DEFAULT_THRESHOLDS;
   const enrolTarget = month.target ?? 0;
   const enrolScore = enrolTarget === 0 ? 0 : (() => {
     const r = (month.enrolled ?? 0) / enrolTarget;
-    if (r >= 0.9) return 0;
-    if (r >= 0.75) return 1;
-    if (r >= 0.5) return 2;
+    if (r >= t.enrolment.watch)    return 0;
+    if (r >= t.enrolment.warn)     return 1;
+    if (r >= t.enrolment.critical) return 2;
     return 3;
   })();
 
   const sfDenom = (month.enrolled ?? 0) + (month.screenFailures ?? 0);
   const sfScore = sfDenom === 0 ? 0 : (() => {
     const r = (month.screenFailures ?? 0) / sfDenom;
-    if (r < 0.3) return 0;
-    if (r < 0.5) return 1;
-    if (r < 0.7) return 2;
+    if (r < t.screenFailure.watch)    return 0;
+    if (r < t.screenFailure.warn)     return 1;
+    if (r < t.screenFailure.critical) return 2;
     return 3;
   })();
 
   const q = month.queriesAged ?? 0;
-  const qScore = q === 0 ? 0 : q <= 3 ? 1 : q <= 8 ? 2 : 3;
+  const qScore = q === 0 ? 0 : q <= t.queryBurden.watch ? 1 : q <= t.queryBurden.warn ? 2 : 3;
 
   const sdv = month.sdvPct ?? 1;
-  const sdvScore = sdv >= 0.9 ? 0 : sdv >= 0.8 ? 1 : sdv >= 0.65 ? 2 : 3;
+  const sdvScore = sdv >= t.sdv.watch ? 0 : sdv >= t.sdv.warn ? 1 : sdv >= t.sdv.critical ? 2 : 3;
 
   const dev = month.deviations ?? 0;
-  const devScore = dev === 0 ? 0 : dev <= 2 ? 1 : 2;
+  const devScore = dev < t.deviations.watch ? 0 : dev < t.deviations.warn ? 1 : 2;
 
   return enrolScore + sfScore + qScore + sdvScore + devScore;
 }
@@ -143,7 +147,8 @@ function hasLeaveKeyword(notes) {
   return ['leave', 'annual leave', 'absence', 'away', 'off sick'].some(kw => combined.includes(kw));
 }
 
-export function scoreSites(sites, trialMeta) {
+export function scoreSites(sites, trialMeta, savedThresholds) {
+  const t = mergeThresholds(savedThresholds);
   const dataEndDate = trialMeta.dataEnd;
 
   const scored = Object.values(sites).map(site => {
@@ -160,11 +165,11 @@ export function scoreSites(sites, trialMeta) {
     const screenFailureRate = sfDenom > 0 ? totalScreenFailed / sfDenom : 0;
 
     const scores = {
-      enrolment:    scoreEnrolment(site),
-      screenFailure: scoreScreenFailure(site),
-      queryBurden:  scoreQueryBurden(months),
-      sdv:          scoreSDV(months),
-      deviations:   scoreDeviations(months),
+      enrolment:     scoreEnrolment(site, t),
+      screenFailure: scoreScreenFailure(site, t),
+      queryBurden:   scoreQueryBurden(months, t),
+      sdv:           scoreSDV(months, t),
+      deviations:    scoreDeviations(months, t),
     };
     const baseTotal = scores.enrolment + scores.screenFailure + scores.queryBurden + scores.sdv + scores.deviations;
 
@@ -177,41 +182,37 @@ export function scoreSites(sites, trialMeta) {
     const daysWithoutVisit = lastVisit
       ? (dataEndDate - lastVisit) / (1000 * 60 * 60 * 24)
       : Infinity;
-    const craOverdue = daysWithoutVisit > 45;
+    const craOverdue = daysWithoutVisit > t.craOverdueDays;
 
     const latestMonthWithSdv = [...months].reverse().find(m => m.sdvPct != null);
     const latestSdvPct = latestMonthWithSdv ? latestMonthWithSdv.sdvPct : null;
     const latestQueriesAged = months.length > 0 ? (months[months.length - 1].queriesAged ?? 0) : 0;
     const deviationsTrend = months.map(m => m.deviations ?? 0);
 
-    // ── Contextual modifiers ──────────────────────────────────────────────
+    // ── Contextual modifiers ─────────────────────────────────────────────
     let adjustedTotal = baseTotal;
     const modifierFlags = [];
     const modifierNotes = [];
 
-    // Modifier 1: Newly activated — < 2 full months of data
     const isNewlyActivated = months.length < 2;
     if (isNewlyActivated) {
       adjustedTotal = Math.max(0, adjustedTotal - 2);
       modifierFlags.push('Recently activated — limited data');
     }
 
-    // Modifier 2: Coordinator on leave
     const onLeave = hasLeaveKeyword(site.notes || []);
     if (onLeave) {
       adjustedTotal = Math.max(0, adjustedTotal - 1);
       modifierNotes.push('Note: recent coordinator absence may affect metrics');
     }
 
-    // Modifier 3: Persistent concern — adds 2 points
     if (persistent) {
       adjustedTotal = Math.min(15, adjustedTotal + 2);
       modifierFlags.push(`⚠ Persistent concern — ${persistent} months`);
     }
 
     scores.total = adjustedTotal;
-
-    const rag = scores.total >= 8 ? 'red' : scores.total >= 4 ? 'amber' : 'green';
+    const rag = scores.total >= t.rag.red ? 'red' : scores.total >= t.rag.amber ? 'amber' : 'green';
 
     return {
       ...site,

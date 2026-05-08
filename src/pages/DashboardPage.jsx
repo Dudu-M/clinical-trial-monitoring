@@ -175,7 +175,7 @@ export default function DashboardPage() {
 
   const hasSites = Object.keys(trial.sites || {}).length > 0;
   const trialMeta = buildTrialMeta(trial);
-  const rankedSites = hasSites ? scoreSites(trial.sites, trialMeta) : [];
+  const rankedSites = hasSites ? scoreSites(trial.sites, trialMeta, trial.thresholds) : [];
 
   const totalEnrolled = rankedSites.reduce((s, site) => s + (site.enrolmentSummary?.cumEnrolled || 0), 0);
   const remaining     = (trial.totalTarget || 0) - totalEnrolled;
@@ -214,7 +214,21 @@ export default function DashboardPage() {
     <div>
       <div className="page-header">
         <div className="page-header-left">
-          <h1 className="page-title">{trial.name}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <h1 className="page-title">{trial.name}</h1>
+            {hasSites && (
+              <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+                {redSites > 0   && <span className="rag-pill red">{redSites} Red</span>}
+                {amberSites > 0 && <span className="rag-pill amber">{amberSites} Amber</span>}
+                {greenSites > 0 && <span className="rag-pill green">{greenSites} Green</span>}
+                {isOnTrack !== null && (
+                  <span className={`trial-stat-track ${isOnTrack ? 'on-track' : 'off-track'}`} style={{ fontSize: 12, padding: '3px 10px' }}>
+                    {isOnTrack ? '↑ On track' : '↓ Off track'}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
           <p className="text-secondary" style={{ marginTop: 4, fontSize: 13 }}>
             {trial.sponsor}{trial.indication ? ` · ${trial.indication}` : ''}
             {dataRange && <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>· {dataRange}</span>}
@@ -238,7 +252,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <DataQualityBanner notices={trial.dataQualityNotices} />
+      <DataQualityBanner notices={trial.dataQualityNotices} trialId={id} />
 
       {/* Trial stat bar */}
       {hasSites && (
@@ -294,26 +308,6 @@ export default function DashboardPage() {
             </>
           )}
 
-          {currentRunRate && requiredRunRate && (
-            <>
-              <div className="trial-stat-divider" />
-              <div className="trial-stat" style={{ flex: '0 0 auto' }}>
-                <div className="trial-stat-label">&nbsp;</div>
-                <div className={`trial-stat-track ${isOnTrack ? 'on-track' : 'off-track'}`}>
-                  {isOnTrack ? '↑ On track' : '↓ Off track'}
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="trial-stat-rag">
-            <div className="trial-stat-label">Site RAG</div>
-            <div className="trial-stat-rag-pills">
-              {redSites > 0   && <span className="rag-pill red">{redSites} Red</span>}
-              {amberSites > 0 && <span className="rag-pill amber">{amberSites} Amber</span>}
-              {greenSites > 0 && <span className="rag-pill green">{greenSites} Green</span>}
-            </div>
-          </div>
         </div>
       )}
 

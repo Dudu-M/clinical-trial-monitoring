@@ -111,7 +111,7 @@ export default function DataUploadPage() {
       totalTarget: trial.totalTarget || 120,
       dataEnd: parsed.dataEnd,
     };
-    const scored = scoreSites(parsed.sites, trialMeta);
+    const scored = scoreSites(parsed.sites, trialMeta, trial.thresholds);
 
     // Convert scored sites array to keyed object for storage
     const sitesObj = {};

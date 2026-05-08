@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppStore } from '../store/AppContext';
 import { scoreSites } from '../logic/scoreSites';
-import { generateSummary } from '../logic/generateSummary';
+import { generateSummary, generateActionableInsights } from '../logic/generateSummary';
 import { generateEmail, generateSponsorUpdate } from '../logic/generateEmail';
 import { analyseNotes } from '../logic/notesIntelligence';
 import RagBadge from '../components/shared/RagBadge';
@@ -24,170 +24,119 @@ function buildTrialMeta(trial) {
 
 function pct(ratio) { return Math.round((ratio ?? 0) * 100) + '%'; }
 
-// ── Grouped stats helpers ────────────────────────────────────────
 function scoreLevel(score) {
   if (score >= 3) return 'flagged';
   if (score >= 1) return 'watch';
   return 'ok';
 }
 
-function StatGroup({ level, children }) {
-  const labels   = { flagged: 'Flagged', watch: 'Watch', ok: 'OK' };
-  const clsMap   = { flagged: 'stat-group-red', watch: 'stat-group-amber', ok: 'stat-group-green' };
-  const items = Array.isArray(children) ? children.filter(Boolean) : [children].filter(Boolean);
-  if (items.length === 0) return null;
-  return (
-    <div className={`stat-group ${clsMap[level]}`}>
-      <div className="stat-group-label">{labels[level]}</div>
-      <div className="stat-group-cards">{items}</div>
-    </div>
-  );
-}
+// ── Single-row metrics ───────────────────────────────────────────
+function MetricsRow({ scored }) {
+  const s = scored.scores || {};
 
-function MetricCard({ label, value, sub, level, style }) {
-  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : 'good';
-  return (
-    <div className={`metric-card ${colorCls}`} style={style}>
-      <div className="label metric-card-label">{label}</div>
-      <div className="metric-card-value">{value}</div>
-      {sub && <div className="metric-card-sub">{sub}</div>}
-    </div>
-  );
-}
+  const craLevel = scored.craOverdue ? 'flagged'
+    : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
+    : 'ok';
 
-function EnrolmentCard({ summary, score }) {
-  const level = scoreLevel(score);
-  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : 'good';
+  const cells = [
+    {
+      key: 'enrol',
+      level: scoreLevel(s.enrolment ?? 0),
+      label: 'Enrolment',
+      value: pct(scored.enrolmentSummary?.ratio),
+      sub: `${scored.enrolmentSummary?.cumEnrolled ?? 0} of ${scored.enrolmentSummary?.cumTarget ?? 0}`,
+      sub2: `${(scored.enrolmentSummary?.runRate ?? 0).toFixed(1)} pts/mo avg`,
+    },
+    {
+      key: 'sf',
+      level: scoreLevel(s.screenFailure ?? 0),
+      label: 'Screen Failure',
+      value: pct(scored.screenFailureRate),
+      sub: 'of screened',
+      hidden: !scored.screenFailureRate,
+    },
+    {
+      key: 'sdv',
+      level: scoreLevel(s.sdv ?? 0),
+      label: 'SDV',
+      value: scored.latestSdvPct != null ? pct(scored.latestSdvPct) : '—',
+      sub: 'latest month',
+    },
+    {
+      key: 'queries',
+      level: scoreLevel(s.queryBurden ?? 0),
+      label: 'Aged Queries',
+      value: scored.latestQueriesAged ?? 0,
+      sub: '>14 days open',
+    },
+    {
+      key: 'dev',
+      level: scoreLevel(s.deviations ?? 0),
+      label: 'Deviations',
+      value: (scored.deviationsTrend || []).at(-1) ?? 0,
+      sub: scored.deviationsTrend?.length > 1 ? (scored.deviationsTrend || []).join(' → ') : 'latest month',
+    },
+    {
+      key: 'cra',
+      level: craLevel,
+      label: 'Last CRA Visit',
+      value: scored.lastMonitoringVisit
+        ? new Date(scored.lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })
+        : '—',
+      sub: scored.daysWithoutVisit != null
+        ? `${scored.daysWithoutVisit}d ago${scored.craOverdue ? ' · overdue' : ''}`
+        : 'no visit recorded',
+    },
+  ].filter(c => !c.hidden);
+
+  const levelCls = { flagged: 'cell-flagged', watch: 'cell-watch', ok: 'cell-ok' };
+  const valueCls = { flagged: 'bad', watch: 'warn', ok: 'good' };
+
   return (
-    <div className={`metric-card ${colorCls}`}>
-      <div className="label metric-card-label">Enrolment</div>
-      <div className="metric-card-value">{pct(summary.ratio)}</div>
-      <div className="metric-card-sub">{summary.cumEnrolled} of {summary.cumTarget} target</div>
-      <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: 4 }}>
-        <span style={{ fontSize: 16, fontWeight: 700 }}>{summary.runRate.toFixed(1)}</span>
-        <span className="metric-card-sub">pts/month avg</span>
+    <div>
+      <div className="site-metrics-row">
+        {cells.map(c => (
+          <div key={c.key} className={`site-metric-cell ${levelCls[c.level]}`}>
+            <div className="label metric-card-label">{c.label}</div>
+            <div className={`metric-card-value ${valueCls[c.level]}`} style={{ fontSize: 20 }}>{c.value}</div>
+            <div className="metric-card-sub">{c.sub}</div>
+            {c.sub2 && <div className="metric-card-sub" style={{ marginTop: 2, borderTop: '1px solid var(--border)', paddingTop: 4 }}>{c.sub2}</div>}
+          </div>
+        ))}
+      </div>
+      {/* Legend */}
+      <div className="site-metrics-legend">
+        <span style={{ fontWeight: 600 }}>Score key:</span>
+        <span><span className="legend-dot dot-ok" />OK (score 0)</span>
+        <span><span className="legend-dot dot-watch" />Watch (score 1–2)</span>
+        <span><span className="legend-dot dot-flagged" />Flagged (score 3)</span>
+        <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>Each dimension 0–3 · Total out of 15</span>
       </div>
     </div>
   );
 }
 
-function CraCard({ lastMonitoringVisit, daysWithoutVisit, craOverdue }) {
-  const level = craOverdue ? 'flagged' : (daysWithoutVisit != null && daysWithoutVisit > 30) ? 'watch' : 'ok';
-  const colorCls = level === 'flagged' ? 'bad' : level === 'watch' ? 'warn' : '';
-  return (
-    <div className={`metric-card ${colorCls}`}>
-      <div className="label metric-card-label">Last CRA Visit</div>
-      {lastMonitoringVisit ? (
-        <>
-          <div className="metric-card-value" style={{ fontSize: 16 }}>
-            {new Date(lastMonitoringVisit).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' })}
-          </div>
-          <div className="metric-card-sub">
-            {daysWithoutVisit != null ? `${daysWithoutVisit}d ago` : ''}
-            {craOverdue ? ' · overdue' : ''}
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="metric-card-value" style={{ fontSize: 22 }}>—</div>
-          <div className="metric-card-sub">no visit recorded</div>
-        </>
-      )}
-    </div>
-  );
-}
-
-function StatGroups({ scored }) {
-  const s = scored.scores || {};
-
-  // Each metric: { key, level, card }
-  const metrics = [
-    {
-      key: 'enrol',
-      level: scoreLevel(s.enrolment ?? 0),
-      card: scored.enrolmentSummary && (
-        <EnrolmentCard key="enrol" summary={scored.enrolmentSummary} score={s.enrolment ?? 0} />
-      ),
-    },
-    scored.screenFailureRate > 0 && {
-      key: 'sf',
-      level: scoreLevel(s.screenFailure ?? 0),
-      card: (
-        <MetricCard
-          key="sf"
-          label="Screen Failure"
-          value={pct(scored.screenFailureRate)}
-          sub="of screened"
-          level={scoreLevel(s.screenFailure ?? 0)}
-        />
-      ),
-    },
-    scored.latestSdvPct != null && {
-      key: 'sdv',
-      level: scoreLevel(s.sdv ?? 0),
-      card: (
-        <MetricCard
-          key="sdv"
-          label="SDV"
-          value={pct(scored.latestSdvPct)}
-          sub="latest month"
-          level={scoreLevel(s.sdv ?? 0)}
-        />
-      ),
-    },
-    {
-      key: 'queries',
-      level: scoreLevel(s.queryBurden ?? 0),
-      card: (
-        <MetricCard
-          key="queries"
-          label="Aged Queries"
-          value={scored.latestQueriesAged || 0}
-          sub=">14 days"
-          level={scoreLevel(s.queryBurden ?? 0)}
-        />
-      ),
-    },
-    scored.deviationsTrend && scored.deviationsTrend.some(d => d > 0) && {
-      key: 'dev',
-      level: scoreLevel(s.deviations ?? 0),
-      card: (
-        <MetricCard
-          key="dev"
-          label="Deviations"
-          value={scored.deviationsTrend[scored.deviationsTrend.length - 1]}
-          sub={scored.deviationsTrend.join(' → ')}
-          level={scoreLevel(s.deviations ?? 0)}
-        />
-      ),
-    },
-    {
-      key: 'cra',
-      level: scored.craOverdue ? 'flagged'
-        : scored.daysWithoutVisit != null && scored.daysWithoutVisit > 30 ? 'watch'
-        : 'ok',
-      card: (
-        <CraCard
-          key="cra"
-          lastMonitoringVisit={scored.lastMonitoringVisit}
-          daysWithoutVisit={scored.daysWithoutVisit}
-          craOverdue={scored.craOverdue}
-        />
-      ),
-    },
-  ].filter(Boolean);
-
-  const groups = {
-    flagged: metrics.filter(m => m.level === 'flagged'),
-    watch:   metrics.filter(m => m.level === 'watch'),
-    ok:      metrics.filter(m => m.level === 'ok'),
+// ── Actionable insight card ──────────────────────────────────────
+function InsightCard({ insight, onTabSwitch }) {
+  const clsMap = {
+    critical: { wrap: 'insight-critical', icon: '⚠' },
+    action:   { wrap: 'insight-action',   icon: '→' },
+    watch:    { wrap: 'insight-watch',    icon: '◎' },
+    insight:  { wrap: 'insight-info',     icon: '💡' },
   };
-
+  const { wrap, icon } = clsMap[insight.severity] || clsMap.insight;
   return (
-    <div style={{ marginBottom: 16 }}>
-      <StatGroup level="flagged">{groups.flagged.map(m => m.card)}</StatGroup>
-      <StatGroup level="watch">{groups.watch.map(m => m.card)}</StatGroup>
-      <StatGroup level="ok">{groups.ok.map(m => m.card)}</StatGroup>
+    <div className={`insight-card ${wrap}`}>
+      <span className="insight-icon">{icon}</span>
+      <div className="insight-body">
+        <div className="insight-text">{insight.text}</div>
+        {insight.suggestion && <div className="insight-suggestion">{insight.suggestion}</div>}
+        {insight.linkTab && onTabSwitch && (
+          <button className="insight-link" onClick={() => onTabSwitch(insight.linkTab)}>
+            {insight.linkLabel || 'View →'}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -427,10 +376,12 @@ export default function SiteDetailPage() {
 
   const trialMeta = buildTrialMeta(trial);
   const rawSite = trial.sites[siteId];
-  const scored = scoreSites(trial.sites, trialMeta).find(s => s.id === siteId) || rawSite;
+  const scored = scoreSites(trial.sites, trialMeta, trial.thresholds).find(s => s.id === siteId) || rawSite;
 
   const summary  = generateSummary(scored, trialMeta);
+  const insights = generateActionableInsights(scored);
   const ragLabel = scored.rag === 'red' ? 'Red' : scored.rag === 'amber' ? 'Amber' : 'Green';
+  const showTrend = scored.rag !== 'green' || scored.trendSignal === 'improving';
 
   const trendMap = {
     deteriorating:    '↓ Deteriorating',
@@ -439,9 +390,7 @@ export default function SiteDetailPage() {
     improving:        '↑ Improving',
   };
 
-  const showTrend = scored.rag !== 'green' || scored.trendSignal === 'improving';
-
-  const allNotes   = rawSite.notes || [];
+  const allNotes    = rawSite.notes || [];
   const stringNotes = allNotes.filter(n => typeof n === 'string');
 
   const tabs = [
@@ -475,7 +424,7 @@ export default function SiteDetailPage() {
               f.includes('Persistent') ? (
                 <div key={i} className="persistent-tooltip">
                   <span className="flag-chip red">{f}</span>
-                  {scored.persistentConcernMonthLabels && scored.persistentConcernMonthLabels.length > 0 && (
+                  {scored.persistentConcernMonthLabels?.length > 0 && (
                     <div className="persistent-tooltip-box">
                       High-risk score in: {scored.persistentConcernMonthLabels.join(', ')}
                     </div>
@@ -518,27 +467,43 @@ export default function SiteDetailPage() {
       {/* Tab: Overview */}
       {activeTab === 'overview' && (
         <div>
-          {/* Stats grouped by status — first */}
-          <StatGroups scored={scored} />
+          {/* All 6 metric cards in one row */}
+          <MetricsRow scored={scored} />
 
-          {/* Score breakdown */}
+          {/* Why flagged — FIRST, with insights + operational notes inside */}
           <div className="card card-pad" style={{ marginBottom: 16 }}>
-            <div className="section-title" style={{ marginBottom: 12 }}>
-              Score Breakdown
-              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>(0 = no concern, 3 = critical)</span>
-            </div>
-            {scored.scores && <ScoreBreakdown scores={scored.scores} />}
+            <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
+            <p style={{ fontSize: 13, lineHeight: 1.7, marginBottom: insights.length > 0 ? 16 : 0 }}>{summary}</p>
+
+            {/* Actionable insights */}
+            {insights.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: stringNotes.length > 0 ? 16 : 0 }}>
+                {insights.map((ins, i) => (
+                  <InsightCard key={i} insight={ins} onTabSwitch={setActiveTab} />
+                ))}
+              </div>
+            )}
+
+            {/* Operational notes from Excel */}
+            {stringNotes.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                <div className="label" style={{ marginBottom: 8 }}>Operational notes from data</div>
+                <NotesIntelligence notes={stringNotes} />
+              </div>
+            )}
           </div>
 
-          {/* Why flagged */}
+          {/* Score breakdown */}
           <div className="card card-pad">
-            <div className="section-title" style={{ marginBottom: 10 }}>Why this site is flagged</div>
-            <p style={{ fontSize: 13, lineHeight: 1.7 }}>{summary}</p>
+            <div className="section-title" style={{ marginBottom: 12 }}>
+              Score Breakdown
+              <span style={{ fontWeight: 400, fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>(0 = no concern, 3 = critical per dimension)</span>
+            </div>
+            {scored.scores && <ScoreBreakdown scores={scored.scores} />}
           </div>
         </div>
       )}
 
-      {/* Tab: Monthly data */}
       {activeTab === 'months' && (
         <div className="card card-pad">
           {scored.months && scored.months.length > 0
@@ -547,7 +512,6 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Tab: Operational notes */}
       {activeTab === 'notes' && (
         <div className="card card-pad">
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14 }}>
@@ -557,14 +521,12 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Tab: Team notes */}
       {activeTab === 'team' && (
         <div className="card card-pad">
           <UserNotesSection trialId={id} siteId={siteId} notes={rawSite.notes || []} />
         </div>
       )}
 
-      {/* Tab: Email draft */}
       {activeTab === 'email' && (
         <div>
           <div className="card card-pad" style={{ marginBottom: 16 }}>
@@ -581,7 +543,6 @@ export default function SiteDetailPage() {
         </div>
       )}
 
-      {/* Tab: Email log */}
       {activeTab === 'log' && (
         <div className="card card-pad">
           <EmailLogSection emailLog={rawSite.emailLog || []} />

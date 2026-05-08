@@ -58,7 +58,7 @@ export default function Sidebar({ trialId }) {
   const trial = trialId ? state.trials[trialId] : null;
 
   const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('sidebarCollapsed') === 'true'
+    () => localStorage.getItem('sidebarCollapsed') !== 'false'  // default: closed
   );
 
   function toggle() {

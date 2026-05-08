@@ -86,11 +86,14 @@ export default function LandingPage() {
               .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
               .map(trial => {
                 const siteCount = Object.keys(trial.sites || {}).length;
+                // Sum enrolled across ALL months (cumulative), not just the last month
                 const totalEnrolled = Object.values(trial.sites || {}).reduce((sum, s) => {
-                  const months = s.months || [];
-                  const lastMonth = months[months.length - 1];
-                  return sum + (lastMonth?.enrolled || 0);
+                  return sum + (s.months || []).reduce((ms, m) => ms + (m.enrolled || 0), 0);
                 }, 0);
+                // RAG counts from stored scored sites
+                const redCount   = Object.values(trial.sites || {}).filter(s => s.rag === 'red').length;
+                const amberCount = Object.values(trial.sites || {}).filter(s => s.rag === 'amber').length;
+                const greenCount = Object.values(trial.sites || {}).filter(s => s.rag === 'green').length;
 
                 return (
                   <div key={trial.id} className="trial-card" onClick={() => openTrial(trial.id)}>
@@ -117,6 +120,15 @@ export default function LandingPage() {
                         </div>
                       )}
                     </div>
+
+                    {/* Site RAG summary */}
+                    {siteCount > 0 && (redCount > 0 || amberCount > 0 || greenCount > 0) && (
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {redCount > 0   && <span className="rag-pill red">{redCount} Red</span>}
+                        {amberCount > 0 && <span className="rag-pill amber">{amberCount} Amber</span>}
+                        {greenCount > 0 && <span className="rag-pill green">{greenCount} Green</span>}
+                      </div>
+                    )}
 
                     <div className="trial-card-footer">
                       <span className="trial-card-date">
